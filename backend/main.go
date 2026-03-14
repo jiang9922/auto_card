@@ -300,13 +300,13 @@ func getLiveCodes(c *gin.Context) {
 	}
 
 	// 只返回最近2分钟内有验证码的数据
-	query := `SELECT id, card_no, phone, card_code, card_expired_date, created_at 
-		FROM cards 
+	query := `SELECT id, card_no, phone, card_code, card_expired_date, created_at
+		FROM cards
 		WHERE card_check = 1 AND card_code IS NOT NULL AND card_code != ''
 		AND (card_expired_date IS NULL OR datetime(card_expired_date) > datetime('now', '-2 minutes'))
-		ORDER BY card_expired_date DESC, created_at DESC 
+		ORDER BY card_expired_date DESC, created_at DESC
 		LIMIT ?`
-	
+
 	rows, err := db.Query(query, limit)
 	if err != nil {
 		c.JSON(500, Response{Code: -1, Message: "查询失败"})
@@ -344,11 +344,11 @@ func getLiveCodes(c *gin.Context) {
 func autoQueryPendingCardsSync() {
 	// 查询所有卡密（最多50条，同步查询）
 	rows, err := db.Query(`
-		SELECT card_no, card_link, query_token 
-		FROM cards 
-		WHERE card_link IS NOT NULL 
+		SELECT card_no, card_link, query_token
+		FROM cards
+		WHERE card_link IS NOT NULL
 		AND card_link != ''
-		ORDER BY created_at DESC 
+		ORDER BY created_at DESC
 		LIMIT 50`)
 	if err != nil {
 		log.Printf("自动查询失败: %v", err)
@@ -388,21 +388,25 @@ func queryRemoteCard(cardLink, cardNo string) {
 		return
 	}
 
+	log.Printf("远程接口返回: code=%d, msg=%s, data=%+v", remoteResp.Code, remoteResp.Msg, remoteResp.Data)
+
 	rawNote, _ := json.Marshal(remoteResp)
 	note := string(rawNote)
 
-	// 校验验证码与过期时间
-	if remoteResp.Code == 1 && remoteResp.Data.Code != "" {
+	// 校验验证码与过期时间（code == 1 或 code == 0 表示成功）
+	if (remoteResp.Code == 1 || remoteResp.Code == 0) && remoteResp.Data.Code != "" {
 		code := extractVerificationCode(remoteResp.Data.Code)
 		expired := convertTimeFormat(remoteResp.Data.ExpiredDate)
-		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", 
+		log.Printf("获取到验证码: card=%s, code=%s, expired=%s", cardNo, code, expired)
+		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
 			code, expired, note, cardNo, cardNo)
 		if err != nil {
 			log.Printf("更新数据库失败: %v", err)
 		}
 	} else {
+		log.Printf("未获取到验证码: card=%s, code=%d", cardNo, remoteResp.Code)
 		// 只标记已查，不更新验证码
-		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", 
+		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
 			note, cardNo, cardNo)
 		if err != nil {
 			log.Printf("标记已查失败: %v", err)
@@ -481,7 +485,7 @@ func addCard(c *gin.Context) {
 
 	baseURL := getBaseURL(c)
 	added := []Card{}
-	
+
 	// 如果不允许重复，先检查哪些卡号已存在
 	existingCards := make(map[string]bool)
 	if !req.AllowDuplicates {
@@ -498,19 +502,19 @@ func addCard(c *gin.Context) {
 		}
 		log.Printf("不允许重复添加，发现 %d 个重复卡号", len(existingCards))
 	}
-	
+
 	for _, card := range cards {
 		// 如果不允许重复且卡号已存在，则跳过
 		if !req.AllowDuplicates && existingCards[card.CardNo] {
 			log.Printf("跳过重复卡号: %s", card.CardNo)
 			continue
 		}
-		
+
 		// 生成随机字母后缀，格式：卡号_随机6位字母
 		randomSuffix := generateRandomString(6)
 		queryToken := fmt.Sprintf("%s_%s", card.CardNo, randomSuffix)
 		queryURL := fmt.Sprintf("%s/query?card=%s", baseURL, url.QueryEscape(queryToken))
-		
+
 		_, err := db.Exec(
 			"INSERT INTO cards (card_no, card_link, phone, remark, query_url, query_token, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
 			card.CardNo, card.CardLink, card.Phone, req.Remark, queryURL, queryToken,
@@ -530,7 +534,7 @@ func addCard(c *gin.Context) {
 	if skipped > 0 {
 		message = fmt.Sprintf("成功添加 %d 条，跳过 %d 条重复", len(added), skipped)
 	}
-	
+
 	c.JSON(200, Response{
 		Code:    0,
 		Message: message,
@@ -751,9 +755,10 @@ func convertTimeFormat(s string) string {
 }
 
 type RemoteResponse struct {
-	Code int        `json:"code"`
-	Msg  string     `json:"msg"`
-	Data RemoteData `json:"data"`
+	Code    int        `json:"code"`
+	Msg     string     `json:"msg"`
+	Message string     `json:"message"`
+	Data    RemoteData `json:"data"`
 }
 
 type RemoteData struct {
