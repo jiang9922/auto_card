@@ -258,7 +258,7 @@ onUnmounted(() => {
 <style scoped>
 .query-page {
   max-width: 1200px;
-  margin: 20px auto;
+  margin: 20px 40px 20px auto;
   padding: 0 20px;
 }
 
