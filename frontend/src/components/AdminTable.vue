@@ -153,7 +153,7 @@ const input = ref('')
 const adding = ref(false)
 const msg = ref('')
 const msgType = ref('')
-const allowDuplicates = ref(true) // 默认允许重复添加
+const allowDuplicates = ref(false) // 默认不允许重复添加
 const batchRemark = ref('') // 批量备注
 // 选中项与校验错误统计
 const selected = ref<number[]>([])

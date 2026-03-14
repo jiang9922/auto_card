@@ -286,7 +286,11 @@ func getAllCards(c *gin.Context) {
 // 查询参数：
 //   - limit：返回条数，默认 20
 // 返回：最近获取的验证码列表
+// 自动查询未获取验证码的卡密
 func getLiveCodes(c *gin.Context) {
+	// 先自动查询未获取验证码的卡密
+	autoQueryPendingCards()
+
 	limitStr := c.Query("limit")
 	limit := 20
 	if limitStr != "" {
@@ -332,6 +336,79 @@ func getLiveCodes(c *gin.Context) {
 		Message: "success",
 		Data:    cards,
 	})
+}
+
+// 自动查询未获取验证码的卡密
+func autoQueryPendingCards() {
+	// 查询最近添加的、还没有验证码的卡密（最多20条）
+	rows, err := db.Query(`
+		SELECT card_no, card_link, query_token 
+		FROM cards 
+		WHERE (card_code IS NULL OR card_code = '') 
+		AND card_link IS NOT NULL 
+		AND card_link != ''
+		ORDER BY created_at DESC 
+		LIMIT 20`)
+	if err != nil {
+		log.Printf("自动查询失败: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cardNo, cardLink, queryToken string
+		if err := rows.Scan(&cardNo, &cardLink, &queryToken); err != nil {
+			continue
+		}
+
+		// 使用 query_token 或 card_no 查询
+		token := queryToken
+		if token == "" {
+			token = cardNo
+		}
+
+		// 异步查询，不阻塞返回
+		go func(link, tok string) {
+			queryRemoteCard(link, tok)
+		}(cardLink, token)
+	}
+}
+
+// 查询远程卡密信息（内部使用）
+func queryRemoteCard(cardLink, cardNo string) {
+	resp, err := http.Get(cardLink)
+	if err != nil {
+		log.Printf("远程接口错误: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var remoteResp RemoteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&remoteResp); err != nil {
+		log.Printf("解析响应失败: %v", err)
+		return
+	}
+
+	rawNote, _ := json.Marshal(remoteResp)
+	note := string(rawNote)
+
+	// 校验验证码与过期时间
+	if remoteResp.Code == 1 && remoteResp.Data.Code != "" {
+		code := extractVerificationCode(remoteResp.Data.Code)
+		expired := convertTimeFormat(remoteResp.Data.ExpiredDate)
+		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", 
+			code, expired, note, cardNo, cardNo)
+		if err != nil {
+			log.Printf("更新数据库失败: %v", err)
+		}
+	} else {
+		// 只标记已查，不更新验证码
+		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", 
+			note, cardNo, cardNo)
+		if err != nil {
+			log.Printf("标记已查失败: %v", err)
+		}
+	}
 }
 
 // 更新备注
