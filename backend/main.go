@@ -803,10 +803,14 @@ type SMSSyncRequest struct {
 
 // 接收短信推送
 func receiveSMSPush(c *gin.Context) {
+	// 打印原始请求体用于调试
+	body, _ := c.GetRawData()
+	log.Printf("收到短信推送原始数据: %s", string(body))
+
 	var req SMSSyncRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Printf("短信推送解析失败: %v", err)
-		c.JSON(400, Response{Code: -1, Message: "请求格式错误"})
+	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("短信推送解析失败: %v, 原始数据: %s", err, string(body))
+		c.JSON(200, Response{Code: -1, Message: "请求格式错误"})
 		return
 	}
 
