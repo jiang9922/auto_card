@@ -342,12 +342,106 @@ h2 {
 
 /* 移动端适配 */
 @media (max-width: 900px) {
+  .query-page {
+    margin: 10px auto;
+    padding: 0 12px;
+  }
+  
+  h2 {
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+  
+  .subtitle {
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+  
   .main-content {
     flex-direction: column;
+    gap: 16px;
+  }
+  
+  .codes-section {
+    max-width: 100%;
   }
   
   .notice-section {
     width: 100%;
+  }
+  
+  .notice-card {
+    padding: 16px;
+    border-left: 3px solid #ff6b6b;
+  }
+  
+  .notice-card h3 {
+    font-size: 15px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+  
+  .notice-item {
+    margin-bottom: 12px;
+  }
+  
+  .notice-item h4 {
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  
+  .notice-item p {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  
+  .notice-footer {
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+  
+  .code-card {
+    padding: 14px;
+    border-left-width: 3px;
+  }
+  
+  .row {
+    padding: 6px 0;
+  }
+  
+  .label {
+    font-size: 13px;
+  }
+  
+  .value {
+    font-size: 14px;
+  }
+  
+  .code {
+    font-size: 22px;
+  }
+  
+  .btn-copy {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  
+  .time {
+    font-size: 12px;
+  }
+  
+  .countdown {
+    font-size: 11px;
+  }
+  
+  .status {
+    font-size: 13px;
+    margin-top: 16px;
+  }
+  
+  .footer {
+    font-size: 12px;
+    margin-top: 20px;
   }
 }
 
