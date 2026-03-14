@@ -934,6 +934,10 @@ func cleanPhoneNumber(phone string) string {
 	phone = strings.TrimPrefix(phone, "+")
 	phone = strings.TrimPrefix(phone, "86")
 	phone = strings.TrimSpace(phone)
+	// 如果手机号是10位且不以1开头，可能在前面补1
+	if len(phone) == 10 && !strings.HasPrefix(phone, "1") {
+		phone = "1" + phone
+	}
 	return phone
 }
 
