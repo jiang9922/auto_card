@@ -67,21 +67,12 @@ let countdownTimer: any = null
 // 每条显示2分钟（120秒）
 const DISPLAY_DURATION = 120
 
-// 可见的验证码列表（带剩余时间计算）
+// 可见的验证码列表（后端已按时间过滤，前端直接显示）
 const visibleCodes = computed(() => {
-  const currentTime = now.value
-  return codes.value
-    .map(item => {
-      const createdTime = new Date(item.created_at).getTime()
-      const elapsed = (currentTime - createdTime) / 1000
-      const remainingTime = Math.max(0, DISPLAY_DURATION - elapsed)
-      return {
-        ...item,
-        remainingTime
-      }
-    })
-    .filter(item => item.remainingTime > 0)
-    .sort((a, b) => b.remainingTime - a.remainingTime)
+  return codes.value.map(item => ({
+    ...item,
+    remainingTime: 60 // 固定显示1分钟倒计时
+  }))
 })
 
 // 获取实时验证码

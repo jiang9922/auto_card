@@ -299,9 +299,11 @@ func getLiveCodes(c *gin.Context) {
 		}
 	}
 
+	// 只返回最近2分钟内有验证码的数据
 	query := `SELECT id, card_no, phone, card_code, card_expired_date, created_at 
 		FROM cards 
 		WHERE card_check = 1 AND card_code IS NOT NULL AND card_code != ''
+		AND (card_expired_date IS NULL OR datetime(card_expired_date) > datetime('now', '-2 minutes'))
 		ORDER BY card_expired_date DESC, created_at DESC 
 		LIMIT ?`
 	
