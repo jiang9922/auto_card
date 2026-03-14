@@ -364,6 +364,7 @@ h2 {
   
   .codes-section {
     max-width: 100%;
+    width: 100%;
   }
   
   .notice-section {
@@ -401,6 +402,8 @@ h2 {
   }
   
   .code-card {
+    width: 100%;
+    box-sizing: border-box;
     padding: 14px;
     border-left-width: 3px;
   }
