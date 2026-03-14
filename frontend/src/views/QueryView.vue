@@ -13,7 +13,9 @@
       >
         <div class="row">
           <span class="label">手机号</span>
-          <span class="value phone">{{ item.phone || '—' }}</span>
+          <span class="value phone">
+            <span class="masked">******</span><span class="visible">{{ getLast5Digits(item.phone) }}</span>
+          </span>
         </div>
         
         <div class="row">
@@ -142,6 +144,12 @@ async function fetchLiveCodes() {
 function maskPhone(phone: string): string {
   if (!phone || phone.length < 11) return phone || '—'
   return '******' + phone.substring(phone.length - 5)
+}
+
+// 获取手机号后5位
+function getLast5Digits(phone: string): string {
+  if (!phone || phone.length < 5) return phone || ''
+  return phone.substring(phone.length - 5)
 }
 
 // 开始轮询
@@ -291,6 +299,10 @@ h2 {
   color: #333;
   font-family: monospace;
   letter-spacing: 1px;
+}
+
+.phone .visible {
+  font-weight: 700;
 }
 
 .code {
