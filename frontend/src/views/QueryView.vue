@@ -4,59 +4,107 @@
     <h2>实时验证码面板</h2>
     <p class="subtitle">自动刷新，每条显示2分钟后自动消失</p>
     
-    <div class="codes-list">
-      <div 
-        v-for="item in visibleCodes" 
-        :key="item.id" 
-        class="code-card"
-        :class="{ 'expiring': item.remainingTime < 30 }"
-      >
-        <div class="row">
-          <span class="label">手机号</span>
-          <span class="value phone">
-            <span class="masked">******</span><span class="visible">{{ getLast5Digits(item.phone) }}</span>
-          </span>
-        </div>
-        
-        <div class="row">
-          <span class="label">验证码</span>
-          <div class="code-wrapper">
-            <span class="value code">{{ item.card_code }}</span>
-            <button 
-              v-if="item.card_code" 
-              @click="copyCode(item.card_code)" 
-              class="btn-copy"
-              :class="{ 'copied': copiedCode === item.card_code }"
-            >
-              {{ copiedCode === item.card_code ? '已复制' : '复制' }}
-            </button>
+    <div class="main-content">
+      <!-- 左侧：验证码列表 -->
+      <div class="codes-section">
+        <div class="codes-list">
+          <div 
+            v-for="item in visibleCodes" 
+            :key="item.id" 
+            class="code-card"
+            :class="{ 'expiring': item.remainingTime < 30 }"
+          >
+            <div class="row">
+              <span class="label">手机号</span>
+              <span class="value phone">
+                <span class="masked">******</span><span class="visible">{{ getLast5Digits(item.phone) }}</span>
+              </span>
+            </div>
+            
+            <div class="row">
+              <span class="label">验证码</span>
+              <div class="code-wrapper">
+                <span class="value code">{{ item.card_code }}</span>
+                <button 
+                  v-if="item.card_code" 
+                  @click="copyCode(item.card_code)" 
+                  class="btn-copy"
+                  :class="{ 'copied': copiedCode === item.card_code }"
+                >
+                  {{ copiedCode === item.card_code ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+            
+            <div class="row">
+              <span class="label">时间</span>
+              <span class="value time">{{ formatTime(item.created_at) }}</span>
+            </div>
+            
+            <div class="progress-bar">
+              <div 
+                class="progress" 
+                :style="{ width: (item.remainingTime / 120 * 100) + '%' }"
+                :class="{ 'warning': item.remainingTime < 30 }"
+              ></div>
+            </div>
+            
+            <div class="countdown">{{ Math.ceil(item.remainingTime) }}秒后消失</div>
+          </div>
+          
+          <div v-if="visibleCodes.length === 0" class="empty">
+            暂无验证码数据
           </div>
         </div>
         
-        <div class="row">
-          <span class="label">时间</span>
-          <span class="value time">{{ formatTime(item.created_at) }}</span>
+        <div class="status">
+          <span class="dot" :class="{ 'active': isPolling }"></span>
+          {{ isPolling ? '实时监控中' : '已暂停' }}
         </div>
-        
-        <div class="progress-bar">
-          <div 
-            class="progress" 
-            :style="{ width: (item.remainingTime / 120 * 100) + '%' }"
-            :class="{ 'warning': item.remainingTime < 30 }"
-          ></div>
-        </div>
-        
-        <div class="countdown">{{ Math.ceil(item.remainingTime) }}秒后消失</div>
       </div>
       
-      <div v-if="visibleCodes.length === 0" class="empty">
-        暂无验证码数据
+      <!-- 右侧：公告 -->
+      <div class="notice-section">
+        <div class="notice-card">
+          <h3>📢 常见问题解决方法</h3>
+          
+          <div class="notice-item">
+            <h4>出现不来码</h4>
+            <p>检查手机号是否输入正确，区号是否改为美国+1。上述没问题，稍后一分钟再试（可以切换网络尝试）。</p>
+          </div>
+          
+          <div class="notice-item">
+            <h4>手机号不存在</h4>
+            <p>区号未改为美国+1。</p>
+          </div>
+          
+          <div class="notice-item">
+            <h4>填入验证码提示错误</h4>
+            <p>验证码超时或者重复点了两次，重新获取即可。</p>
+          </div>
+          
+          <div class="notice-item">
+            <h4>登陆出现绑定</h4>
+            <p>请返回取消，去应用商店更新一下腾讯视频版本即可直登。</p>
+          </div>
+          
+          <div class="notice-item">
+            <h4>播放验证</h4>
+            <p>切换主身份登陆播放视频，点立即验证网址接码即可恢复。</p>
+          </div>
+          
+          <div class="notice-item">
+            <h4>使用说明</h4>
+            <p>本商品验证码链接一个月有效，可以重复登陆，掉线自行重登即可。</p>
+            <p>五端通用，任选一台登陆，切换设备退出上一台。</p>
+            <p>电视只支持新版云视听极光，不支持NEW极光，不支持第三方定制的电视版本。</p>
+          </div>
+          
+          <div class="notice-footer">
+            <p>非上述问题联系客服，异常可换号，不支持退款，谢谢。</p>
+          </div>
+        </div>
       </div>
-    </div>
-    
-    <div class="status">
-      <span class="dot" :class="{ 'active': isPolling }"></span>
-      {{ isPolling ? '实时监控中' : '已暂停' }}
     </div>
     
     <div class="footer">验证码查询系统 v2.0</div>
@@ -205,7 +253,7 @@ onUnmounted(() => {
 
 <style scoped>
 .query-page {
-  max-width: 600px;
+  max-width: 1200px;
   margin: 20px auto;
   padding: 0 20px;
 }
@@ -221,6 +269,82 @@ h2 {
   color: #999;
   font-size: 14px;
   margin-bottom: 24px;
+}
+
+/* 主内容区：左右两栏 */
+.main-content {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+/* 左侧：验证码列表 */
+.codes-section {
+  flex: 1;
+  max-width: 600px;
+}
+
+/* 右侧：公告 */
+.notice-section {
+  width: 350px;
+  flex-shrink: 0;
+}
+
+.notice-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  border-left: 4px solid #ff6b6b;
+}
+
+.notice-card h3 {
+  color: #333;
+  margin-bottom: 16px;
+  font-size: 16px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 12px;
+}
+
+.notice-item {
+  margin-bottom: 16px;
+}
+
+.notice-item h4 {
+  color: #007bff;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.notice-item p {
+  color: #666;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.notice-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.notice-footer p {
+  color: #dc3545;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* 移动端适配 */
+@media (max-width: 900px) {
+  .main-content {
+    flex-direction: column;
+  }
+  
+  .notice-section {
+    width: 100%;
+  }
 }
 
 .codes-list {
