@@ -13,8 +13,10 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -767,6 +769,145 @@ type RemoteData struct {
 	ExpiredDate string `json:"expired_date"`
 }
 
+// ==================== 短信验证码存储 ====================
+// 内存存储最近的短信验证码（用于实时面板）
+type SMSCode struct {
+	ID        string    `json:"id"`
+	Phone     string    `json:"phone"`
+	Code      string    `json:"code"`
+	Msg       string    `json:"msg"`
+	From      string    `json:"from"`
+	CodeTime  string    `json:"code_time"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// 短信验证码缓存（最多保存100条，2分钟后过期）
+var smsCodeCache = make(map[string]*SMSCode)
+var smsCacheMutex sync.RWMutex
+
+// 短信推送请求结构
+type SMSSyncRequest struct {
+	MsgID     string `json:"msgid"`
+	From      string `json:"from"`
+	Tel       string `json:"tel"`
+	Msg       string `json:"msg"`
+	IsVoice   string `json:"is_voice"`
+	CodeTime  string `json:"code_time"`
+	EndTime   string `json:"end_time"`
+	OrderID   string `json:"order_id"`
+	OrderNum  string `json:"ordernum"`
+	APIID     string `json:"api_id"`
+	APIToken  string `json:"api_token"`
+	UserID    string `json:"user_id"`
+}
+
+// 接收短信推送
+func receiveSMSPush(c *gin.Context) {
+	var req SMSSyncRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("短信推送解析失败: %v", err)
+		c.JSON(400, Response{Code: -1, Message: "请求格式错误"})
+		return
+	}
+
+	// 从短信内容中提取验证码
+	code := extractCodeFromSMS(req.Msg)
+	if code == "" {
+		log.Printf("未从短信中提取到验证码: %s", req.Msg)
+		// 仍然保存，但验证码为空
+	}
+
+	// 清理手机号（去掉+86等前缀）
+	phone := cleanPhoneNumber(req.Tel)
+
+	smsCacheMutex.Lock()
+	defer smsCacheMutex.Unlock()
+
+	// 保存到缓存
+	smsCodeCache[req.MsgID] = &SMSCode{
+		ID:        req.MsgID,
+		Phone:     phone,
+		Code:      code,
+		Msg:       req.Msg,
+		From:      req.From,
+		CodeTime:  req.CodeTime,
+		CreatedAt: time.Now(),
+	}
+
+	log.Printf("收到短信推送: phone=%s, code=%s, msg=%s", phone, code, req.Msg)
+
+	// 清理过期数据（2分钟前）
+	cleanExpiredSMSCodes()
+
+	c.JSON(200, Response{Code: 0, Message: "success"})
+}
+
+// 清理过期的短信验证码
+func cleanExpiredSMSCodes() {
+	cutoff := time.Now().Add(-2 * time.Minute)
+	for id, sms := range smsCodeCache {
+		if sms.CreatedAt.Before(cutoff) {
+			delete(smsCodeCache, id)
+		}
+	}
+}
+
+// 获取实时短信验证码列表
+func getLiveSMSCodes(c *gin.Context) {
+	smsCacheMutex.RLock()
+	defer smsCacheMutex.RUnlock()
+
+	// 清理过期数据
+cleanExpiredSMSCodes()
+
+	// 转换为数组并按时间排序
+	var codes []*SMSCode
+	for _, sms := range smsCodeCache {
+		codes = append(codes, sms)
+	}
+
+	// 按创建时间倒序排列
+	sort.Slice(codes, func(i, j int) bool {
+		return codes[i].CreatedAt.After(codes[j].CreatedAt)
+	})
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "success",
+		Data:    codes,
+	})
+}
+
+// 从短信内容中提取验证码（6位数字）
+func extractCodeFromSMS(msg string) string {
+	// 优先匹配常见的验证码格式
+	patterns := []string{
+		`验证码[是为:：\s]*([0-9]{4,8})`,
+		`code[是为:：\s]*([0-9]{4,8})`,
+		`([0-9]{4,8})[是为]?验证码`,
+		`([0-9]{6})`, // 默认匹配6位数字
+	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(msg)
+		if len(matches) > 1 {
+			return matches[1]
+		}
+	}
+
+	return ""
+}
+
+// 清理手机号格式
+func cleanPhoneNumber(phone string) string {
+	// 去掉+86前缀和空格
+	phone = strings.TrimPrefix(phone, "+")
+	phone = strings.TrimPrefix(phone, "86")
+	phone = strings.TrimSpace(phone)
+	return phone
+}
+
 // ==================== 主函数 ====================
 // 应用入口：初始化静态托管、路由与 CORS，并启动服务
 func main() {
@@ -804,6 +945,8 @@ func main() {
 		api.POST("/admin/export", batchExport)
 		api.GET("/cards/query", queryCard)
 		api.GET("/cards/live", getLiveCodes)
+		api.POST("/sms/push", receiveSMSPush)
+		api.GET("/sms/live", getLiveSMSCodes)
 	}
 
 	// 静态文件服务 - 支持 Railway 路径

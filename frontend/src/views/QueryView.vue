@@ -78,14 +78,29 @@ const visibleCodes = computed(() => {
 // 获取实时验证码
 async function fetchLiveCodes() {
   try {
-    const res = await fetch('/api/cards/live?limit=50')
+    // 使用新的短信验证码接口
+    const res = await fetch('/api/sms/live')
     const json = await res.json()
     if (json.code === 0 && Array.isArray(json.data)) {
-      codes.value = json.data
+      // 转换数据格式
+      codes.value = json.data.map((item: any) => ({
+        id: item.id,
+        phone: maskPhone(item.phone),
+        card_code: item.code,
+        created_at: item.created_at,
+        from: item.from,
+        msg: item.msg
+      }))
     }
   } catch (err) {
     console.error('获取实时验证码失败:', err)
   }
+}
+
+// 手机号脱敏
+function maskPhone(phone: string): string {
+  if (!phone || phone.length < 11) return phone || '—'
+  return phone.substring(0, 3) + '****' + phone.substring(7)
 }
 
 // 开始轮询
