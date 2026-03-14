@@ -787,18 +787,39 @@ var smsCacheMutex sync.RWMutex
 
 // 短信推送请求结构
 type SMSSyncRequest struct {
-	MsgID     string `json:"msgid"`
-	From      string `json:"from"`
-	Tel       string `json:"tel"`
-	Msg       string `json:"msg"`
-	IsVoice   string `json:"is_voice"`
-	CodeTime  string `json:"code_time"`
-	EndTime   string `json:"end_time"`
-	OrderID   string `json:"order_id"`
-	OrderNum  string `json:"ordernum"`
-	APIID     string `json:"api_id"`
-	APIToken  string `json:"api_token"`
-	UserID    string `json:"user_id"`
+	MsgID     string      `json:"msgid"`
+	From      interface{} `json:"from"`  // 兼容数字和字符串
+	Tel       interface{} `json:"tel"`   // 兼容数字和字符串
+	Msg       string      `json:"msg"`
+	IsVoice   interface{} `json:"is_voice"`
+	CodeTime  string      `json:"code_time"`
+	EndTime   string      `json:"end_time"`
+	OrderID   interface{} `json:"order_id"`
+	OrderNum  string      `json:"ordernum"`
+	APIID     interface{} `json:"api_id"`
+	APIToken  string      `json:"api_token"`
+	UserID    interface{} `json:"user_id"`
+	AgentID   interface{} `json:"agent_id"`
+	OrderToken string     `json:"order_token"`
+}
+
+// 将 interface{} 转换为字符串
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		return fmt.Sprintf("%.0f", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 // 接收短信推送
@@ -821,8 +842,12 @@ func receiveSMSPush(c *gin.Context) {
 		// 仍然保存，但验证码为空
 	}
 
+	// 转换字段类型
+	fromStr := toString(req.From)
+	telStr := toString(req.Tel)
+
 	// 清理手机号（去掉+86等前缀）
-	phone := cleanPhoneNumber(req.Tel)
+	phone := cleanPhoneNumber(telStr)
 
 	smsCacheMutex.Lock()
 	defer smsCacheMutex.Unlock()
@@ -833,12 +858,12 @@ func receiveSMSPush(c *gin.Context) {
 		Phone:     phone,
 		Code:      code,
 		Msg:       req.Msg,
-		From:      req.From,
+		From:      fromStr,
 		CodeTime:  req.CodeTime,
 		CreatedAt: time.Now(),
 	}
 
-	log.Printf("收到短信推送: phone=%s, code=%s, msg=%s", phone, code, req.Msg)
+	log.Printf("收到短信推送: phone=%s, code=%s, from=%s", phone, code, fromStr)
 
 	// 清理过期数据（2分钟前）
 	cleanExpiredSMSCodes()
