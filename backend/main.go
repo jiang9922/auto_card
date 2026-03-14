@@ -951,6 +951,10 @@ func main() {
 		api.GET("/cards/live", getLiveCodes)
 		api.POST("/sms/push", receiveSMSPush)
 		api.GET("/sms/live", getLiveSMSCodes)
+		// 健康检查接口
+		api.GET("/health", func(c *gin.Context) {
+			c.JSON(200, Response{Code: 0, Message: "OK"})
+		})
 	}
 
 	// 静态文件服务 - 支持 Railway 路径
