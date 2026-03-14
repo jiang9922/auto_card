@@ -18,7 +18,17 @@
         
         <div class="row">
           <span class="label">验证码</span>
-          <span class="value code">{{ item.card_code }}</span>
+          <div class="code-wrapper">
+            <span class="value code">{{ item.card_code }}</span>
+            <button 
+              v-if="item.card_code" 
+              @click="copyCode(item.card_code)" 
+              class="btn-copy"
+              :class="{ 'copied': copiedCode === item.card_code }"
+            >
+              {{ copiedCode === item.card_code ? '已复制' : '复制' }}
+            </button>
+          </div>
         </div>
         
         <div class="row">
@@ -67,6 +77,9 @@ let countdownTimer: any = null
 // 每条显示2分钟（120秒）
 const DISPLAY_DURATION = 120
 
+// 复制状态
+const copiedCode = ref('')
+
 // 可见的验证码列表（后端已按时间过滤，前端直接显示）
 const visibleCodes = computed(() => {
   return codes.value.map(item => ({
@@ -74,6 +87,34 @@ const visibleCodes = computed(() => {
     remainingTime: 60 // 固定显示1分钟倒计时
   }))
 })
+
+// 复制验证码
+async function copyCode(code: string) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(code)
+    } else {
+      // 降级方案
+      const ta = document.createElement('textarea')
+      ta.value = code
+      ta.style.position = 'fixed'
+      ta.style.top = '-9999px'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copiedCode.value = code
+    setTimeout(() => {
+      if (copiedCode.value === code) {
+        copiedCode.value = ''
+      }
+    }, 2000)
+  } catch (err) {
+    console.error('复制失败:', err)
+  }
+}
 
 // 获取实时验证码
 async function fetchLiveCodes() {
@@ -214,6 +255,31 @@ h2 {
 .label {
   color: #666;
   font-size: 14px;
+}
+
+.code-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-copy {
+  padding: 6px 12px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-copy:hover {
+  background: #0056b3;
+}
+
+.btn-copy.copied {
+  background: #28a745;
 }
 
 .value {
