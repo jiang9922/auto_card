@@ -208,7 +208,7 @@ function getLast5Digits(phone: string): string {
 function startPolling() {
   isPolling.value = true
   fetchLiveCodes() // 立即获取一次
-  pollTimer = setInterval(fetchLiveCodes, 3000) // 每3秒刷新
+  pollTimer = setInterval(fetchLiveCodes, 1000) // 每1秒刷新
 }
 
 // 停止轮询
