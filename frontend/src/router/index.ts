@@ -8,7 +8,6 @@ import type { RouteLocationNormalized } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import QueryView from '../views/QueryView.vue'
 import AdminView from '../views/AdminView.vue'
-import LiveCodesView from '../views/LiveCodesView.vue'
 
 // 路由表：
 // - '/' 重定向到 '/query'
@@ -19,8 +18,7 @@ const routes = [
   { path: '/', redirect: '/query' },
   { path: '/login', component: LoginView, meta: { title: '登录' } },
   { path: '/admin', redirect: '/login' },
-  { path: '/query', component: QueryView, meta: { title: '验证码查询' } },
-  { path: '/live', component: LiveCodesView, meta: { title: '实时验证码' } },
+  { path: '/query', component: QueryView, meta: { title: '实时验证码' } },
   {
     path: '/admin/manage',
     component: AdminView,
