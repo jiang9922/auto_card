@@ -138,10 +138,10 @@ async function fetchLiveCodes() {
   }
 }
 
-// 手机号脱敏
+// 手机号脱敏 - 前6位显示*号
 function maskPhone(phone: string): string {
   if (!phone || phone.length < 11) return phone || '—'
-  return phone.substring(0, 3) + '****' + phone.substring(7)
+  return '******' + phone.substring(6)
 }
 
 // 开始轮询
