@@ -338,17 +338,16 @@ func getLiveCodes(c *gin.Context) {
 	})
 }
 
-// 自动查询未获取验证码的卡密（同步版本）
+// 自动查询所有卡密（同步版本）
 func autoQueryPendingCardsSync() {
-	// 查询最近添加的、还没有验证码的卡密（最多10条，同步查询）
+	// 查询所有卡密（最多50条，同步查询）
 	rows, err := db.Query(`
 		SELECT card_no, card_link, query_token 
 		FROM cards 
-		WHERE (card_code IS NULL OR card_code = '') 
-		AND card_link IS NOT NULL 
+		WHERE card_link IS NOT NULL 
 		AND card_link != ''
 		ORDER BY created_at DESC 
-		LIMIT 10`)
+		LIMIT 50`)
 	if err != nil {
 		log.Printf("自动查询失败: %v", err)
 		return
