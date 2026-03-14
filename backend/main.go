@@ -288,8 +288,8 @@ func getAllCards(c *gin.Context) {
 // 返回：最近获取的验证码列表
 // 自动查询未获取验证码的卡密
 func getLiveCodes(c *gin.Context) {
-	// 先自动查询未获取验证码的卡密
-	autoQueryPendingCards()
+	// 先自动查询未获取验证码的卡密（同步查询，确保获取到最新数据）
+	autoQueryPendingCardsSync()
 
 	limitStr := c.Query("limit")
 	limit := 20
@@ -338,9 +338,9 @@ func getLiveCodes(c *gin.Context) {
 	})
 }
 
-// 自动查询未获取验证码的卡密
-func autoQueryPendingCards() {
-	// 查询最近添加的、还没有验证码的卡密（最多20条）
+// 自动查询未获取验证码的卡密（同步版本）
+func autoQueryPendingCardsSync() {
+	// 查询最近添加的、还没有验证码的卡密（最多10条，同步查询）
 	rows, err := db.Query(`
 		SELECT card_no, card_link, query_token 
 		FROM cards 
@@ -348,7 +348,7 @@ func autoQueryPendingCards() {
 		AND card_link IS NOT NULL 
 		AND card_link != ''
 		ORDER BY created_at DESC 
-		LIMIT 20`)
+		LIMIT 10`)
 	if err != nil {
 		log.Printf("自动查询失败: %v", err)
 		return
@@ -367,10 +367,8 @@ func autoQueryPendingCards() {
 			token = cardNo
 		}
 
-		// 异步查询，不阻塞返回
-		go func(link, tok string) {
-			queryRemoteCard(link, tok)
-		}(cardLink, token)
+		// 同步查询，确保获取到结果
+		queryRemoteCard(cardLink, token)
 	}
 }
 
