@@ -159,9 +159,9 @@
       
       <!-- 验证码列表（验证通过后显示） -->
       <template v-else>
-        <div class="main-content">
-        <!-- 左侧：验证码列表 -->
-        <div class="codes-section">
+        <div class="main-content center-content">
+          <!-- 验证码列表居中 -->
+          <div class="codes-section center-section">
           <div class="codes-list">
             <div 
               v-for="item in visibleCodes" 
@@ -215,53 +215,6 @@
           <div class="status">
             <span class="dot" :class="{ 'active': isPolling }"></span>
             {{ isPolling ? '实时监控中' : '已暂停' }}
-          </div>
-        </div>
-        
-        <!-- 右侧：公告 -->
-        <div class="notice-section">
-          <div class="notice-card">
-            <h3>📢 常见问题解决方法</h3>
-            
-            <div class="notice-item">
-              <h4><strong>不来码验证码</strong></h4>
-              <p>检查我提供的手机号是否输入正确，区号是否改为美国+1。上述没问题，稍后一分钟再试（可以切换网络尝试一下）。</p>
-            </div>
-            
-            <div class="notice-item">
-              <h4><strong>手机号不存在</strong></h4>
-              <p>区号未改为美国+1。</p>
-            </div>
-            
-            <div class="notice-item">
-              <h4><strong>填入验证码提示错误</strong></h4>
-              <p>验证码超时或者重复点了两次，重新获取即可。</p>
-            </div>
-            
-            <div class="notice-item">
-              <h4><strong>登陆出现绑定</strong></h4>
-              <p>请返回取消，去应用商店更新一下腾讯视频版本即可直登。</p>
-            </div>
-            
-            <div class="notice-item">
-              <h4><strong>播放验证</strong></h4>
-              <p>切换主身份登陆播放视频，点立即验证网址接码即可恢复。</p>
-            </div>
-            
-            <div class="notice-item">
-              <h4><strong>掉线可以重登</strong></h4>
-              <p>本商品验证码链接一个月有效，可以重复登陆，掉线自行重登即可。</p>
-              <p>非直充，我提供账号给你登陆，五端通用，任选一台登陆，切换设备退出上一台。</p>
-              <p>电视只支持新版云视听极光，不支持NEW极光，不支持第三方定制的电视版本。</p>
-            </div>
-            
-            <div class="notice-item">
-              <h4><strong>如需登陆视频联系客服</strong></h4>
-            </div>
-            
-            <div class="notice-footer">
-              <p>非上述问题联系客服，异常可换号，不支持退款，谢谢。</p>
-            </div>
           </div>
         </div>
       </div>
@@ -683,6 +636,16 @@ h2 {
 .codes-section {
   flex: 1;
   max-width: 600px;
+}
+
+/* 居中布局 */
+.center-content {
+  justify-content: center;
+}
+
+.center-section {
+  max-width: 600px;
+  margin: 0 auto;
 }
 
 /* 右侧：公告 */
