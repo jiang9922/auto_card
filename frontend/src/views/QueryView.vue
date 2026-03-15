@@ -54,7 +54,25 @@
       <h2>实时验证码面板</h2>
       <p class="subtitle">自动刷新，每条显示2分钟后自动消失</p>
       
-      <div class="main-content">
+      <!-- 密码验证 -->
+      <div v-if="!isVerified" class="password-section">
+        <div class="password-card">
+          <h3>🔒 请输入访问密码</h3>
+          <input
+            v-model="inputPassword"
+            type="password"
+            placeholder="请输入密码"
+            class="password-input"
+            @keyup.enter="verifyPassword"
+          />
+          <button @click="verifyPassword" class="btn-verify">进入</button>
+          <div v-if="passwordError" class="password-error">{{ passwordError }}</div>
+        </div>
+      </div>
+      
+      <!-- 验证码列表（验证通过后显示） -->
+      <template v-else>
+        <div class="main-content">
         <!-- 左侧：验证码列表 -->
         <div class="codes-section">
           <div class="codes-list">
@@ -162,6 +180,7 @@
       </div>
       
       <div class="footer">验证码查询系统 v2.0</div>
+      </template>
     </template>
   </div>
 </template>
@@ -209,6 +228,22 @@ const DISPLAY_DURATION = 120
 
 // 复制状态
 const copiedCode = ref('')
+
+// ===== 密码验证 =====
+const isVerified = ref(false)
+const inputPassword = ref('')
+const passwordError = ref('')
+const CORRECT_PASSWORD = 'admin123'
+
+function verifyPassword() {
+  if (inputPassword.value === CORRECT_PASSWORD) {
+    isVerified.value = true
+    passwordError.value = ''
+  } else {
+    passwordError.value = '密码错误'
+    isVerified.value = false
+  }
+}
 
 // 可见的验证码列表（后端已按时间过滤，前端直接显示）
 const visibleCodes = computed(() => {
@@ -371,6 +406,64 @@ onUnmounted(() => {
 .specific-card-mode h2 {
   text-align: center;
   margin-bottom: 30px;
+}
+
+/* 密码验证 */
+.password-section {
+  max-width: 400px;
+  margin: 40px auto;
+}
+
+.password-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 30px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  text-align: center;
+}
+
+.password-card h3 {
+  color: #333;
+  margin-bottom: 20px;
+  font-size: 18px;
+}
+
+.password-input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 16px;
+  border: 2px solid #eee;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.password-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.btn-verify {
+  width: 100%;
+  padding: 12px 24px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-verify:hover {
+  background: #0056b3;
+}
+
+.password-error {
+  color: #dc3545;
+  margin-top: 12px;
+  font-size: 14px;
 }
 
 .loading {
