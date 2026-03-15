@@ -831,7 +831,15 @@ func receiveSMSPush(c *gin.Context) {
 	var req SMSSyncRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		log.Printf("短信推送解析失败: %v, 原始数据: %s", err, string(body))
-		c.JSON(200, Response{Code: -1, Message: "请求格式错误"})
+		// 即使是测试请求也返回 200，避免对方平台报错
+		c.JSON(200, Response{Code: 0, Message: "received"})
+		return
+	}
+
+	// 如果关键字段为空，可能是测试请求，直接返回成功
+	if req.MsgID == "" || req.Tel == nil {
+		log.Printf("收到测试请求或空数据")
+		c.JSON(200, Response{Code: 0, Message: "received"})
 		return
 	}
 
