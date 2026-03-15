@@ -389,8 +389,8 @@ async function fetchLiveCodes() {
       const data = json.data.codes || json.data
       const userIDs = json.data.user_ids || []
       
-      // 转换数据格式
-      codes.value = data.map((item: any) => ({
+      // 只在数据变化时更新，避免不必要的重新渲染
+      const newCodes = data.map((item: any) => ({
         id: item.id,
         phone: item.phone,
         card_code: item.code,
@@ -400,8 +400,17 @@ async function fetchLiveCodes() {
         user_id: item.user_id
       }))
       
-      // 使用后端返回的所有 user_id 更新下拉框
-      userIDList.value = userIDs
+      // 比较数据是否真正变化
+      if (JSON.stringify(codes.value) !== JSON.stringify(newCodes)) {
+        codes.value = newCodes
+      }
+      
+      // 只在 user_id 列表变化时更新
+      const currentUserIDs = JSON.stringify(userIDList.value.sort())
+      const newUserIDsStr = JSON.stringify(userIDs.sort())
+      if (currentUserIDs !== newUserIDsStr) {
+        userIDList.value = userIDs
+      }
     }
   } catch (err) {
     console.error('获取实时验证码失败:', err)
