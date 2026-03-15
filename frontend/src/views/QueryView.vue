@@ -13,7 +13,7 @@
         {{ cardError }}
       </div>
       
-      <div v-else-if="cardData" class="code-card single-card" :class="{ 'expiring': cardRemainingTime < 30 }">
+      <div v-else-if="cardData" class="code-card single-card">
         <div class="row">
           <span class="label">手机号</span>
           <span class="value phone">
