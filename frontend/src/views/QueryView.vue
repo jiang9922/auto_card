@@ -328,7 +328,7 @@ const visibleCodes = computed(() => {
   return codes.value.map(item => {
     const createdTime = new Date(item.created_at).getTime()
     const elapsed = Math.floor((currentTime - createdTime) / 1000)
-    const remaining = Math.max(0, 60 - elapsed) // 60秒倒计时
+    const remaining = Math.max(0, 120 - elapsed) // 120秒（2分钟）倒计时
     return {
       ...item,
       remainingTime: remaining
