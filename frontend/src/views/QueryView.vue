@@ -1,123 +1,184 @@
 <!-- 查询页：实时验证码面板，自动轮询显示最新验证码 -->
 <template>
   <div class="query-page">
-    <h2>实时验证码面板</h2>
-    <p class="subtitle">自动刷新，每条显示2分钟后自动消失</p>
-    
-    <div class="main-content">
-      <!-- 左侧：验证码列表 -->
-      <div class="codes-section">
-        <div class="codes-list">
-          <div 
-            v-for="item in visibleCodes" 
-            :key="item.id" 
-            class="code-card"
-            :class="{ 'expiring': item.remainingTime < 30 }"
-          >
-            <div class="row">
-              <span class="label">手机号</span>
-              <span class="value phone">
-                <span class="masked">******</span><span class="visible">{{ getLast5Digits(item.phone) }}</span>
-              </span>
-            </div>
-            
-            <div class="row">
-              <span class="label">验证码</span>
-              <div class="code-wrapper">
-                <span class="value code">{{ item.card_code }}</span>
-                <button 
-                  v-if="item.card_code" 
-                  @click="copyCode(item.card_code)" 
-                  class="btn-copy"
-                  :class="{ 'copied': copiedCode === item.card_code }"
-                >
-                  {{ copiedCode === item.card_code ? '已复制' : '复制' }}
-                </button>
-              </div>
-            </div>
-            
-            <div class="row">
-              <span class="label">时间</span>
-              <span class="value time">{{ formatTime(item.created_at) }}</span>
-            </div>
-            
-            <div class="progress-bar">
-              <div 
-                class="progress" 
-                :style="{ width: (item.remainingTime / 120 * 100) + '%' }"
-                :class="{ 'warning': item.remainingTime < 30 }"
-              ></div>
-            </div>
-            
-            <div class="countdown">{{ Math.ceil(item.remainingTime) }}秒后消失</div>
-          </div>
-          
-          <div v-if="visibleCodes.length === 0" class="empty">
-            暂无验证码数据
+    <!-- 特定卡密查询模式 -->
+    <div v-if="isSpecificCardQuery" class="specific-card-mode">
+      <h2>验证码查询</h2>
+      
+      <div v-if="cardLoading" class="loading">
+        查询中...
+      </div>
+      
+      <div v-else-if="cardError" class="error-message">
+        {{ cardError }}
+      </div>
+      
+      <div v-else-if="cardData" class="code-card single-card">
+        <div class="row">
+          <span class="label">手机号</span>
+          <span class="value phone">
+            <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardData.phone) }}</span>
+          </span>
+        </div>
+        
+        <div class="row">
+          <span class="label">验证码</span>
+          <div class="code-wrapper">
+            <span class="value code">{{ cardData.card_code || '暂无验证码' }}</span>
+            <button 
+              v-if="cardData.card_code" 
+              @click="copyCode(cardData.card_code)" 
+              class="btn-copy"
+              :class="{ 'copied': copiedCode === cardData.card_code }"
+            >
+              {{ copiedCode === cardData.card_code ? '已复制' : '复制' }}
+            </button>
           </div>
         </div>
         
-        <div class="status">
-          <span class="dot" :class="{ 'active': isPolling }"></span>
-          {{ isPolling ? '实时监控中' : '已暂停' }}
+        <div class="row">
+          <span class="label">时间</span>
+          <span class="value time">{{ formatTime(cardData.created_at) }}</span>
+        </div>
+        
+        <div v-if="cardData.expired_date" class="expired-info">
+          过期时间：{{ formatTime(cardData.expired_date) }}
         </div>
       </div>
       
-      <!-- 右侧：公告 -->
-      <div class="notice-section">
-        <div class="notice-card">
-          <h3>📢 常见问题解决方法</h3>
-          
-          <div class="notice-item">
-            <h4><strong>不来码验证码</strong></h4>
-            <p>检查我提供的手机号是否输入正确，区号是否改为美国+1。上述没问题，稍后一分钟再试（可以切换网络尝试一下）。</p>
-          </div>
-          
-          <div class="notice-item">
-            <h4><strong>手机号不存在</strong></h4>
-            <p>区号未改为美国+1。</p>
-          </div>
-          
-          <div class="notice-item">
-            <h4><strong>填入验证码提示错误</strong></h4>
-            <p>验证码超时或者重复点了两次，重新获取即可。</p>
-          </div>
-          
-          <div class="notice-item">
-            <h4><strong>登陆出现绑定</strong></h4>
-            <p>请返回取消，去应用商店更新一下腾讯视频版本即可直登。</p>
-          </div>
-          
-          <div class="notice-item">
-            <h4><strong>播放验证</strong></h4>
-            <p>切换主身份登陆播放视频，点立即验证网址接码即可恢复。</p>
-          </div>
-          
-          <div class="notice-item">
-            <h4><strong>掉线可以重登</strong></h4>
-            <p>本商品验证码链接一个月有效，可以重复登陆，掉线自行重登即可。</p>
-            <p>非直充，我提供账号给你登陆，五端通用，任选一台登陆，切换设备退出上一台。</p>
-            <p>电视只支持新版云视听极光，不支持NEW极光，不支持第三方定制的电视版本。</p>
-          </div>
-          
-          <div class="notice-item">
-            <h4><strong>如需登陆视频联系客服</strong></h4>
-          </div>
-          
-          <div class="notice-footer">
-            <p>非上述问题联系客服，异常可换号，不支持退款，谢谢。</p>
-          </div>
-        </div>
+      <div v-else class="empty">
+        暂无数据
       </div>
     </div>
     
-    <div class="footer">验证码查询系统 v2.0</div>
+    <!-- 实时验证码面板模式 -->
+    <template v-else>
+      <h2>实时验证码面板</h2>
+      <p class="subtitle">自动刷新，每条显示2分钟后自动消失</p>
+      
+      <div class="main-content">
+        <!-- 左侧：验证码列表 -->
+        <div class="codes-section">
+          <div class="codes-list">
+            <div 
+              v-for="item in visibleCodes" 
+              :key="item.id" 
+              class="code-card"
+              :class="{ 'expiring': item.remainingTime < 30 }"
+            >
+              <div class="row">
+                <span class="label">手机号</span>
+                <span class="value phone">
+                  <span class="masked">******</span><span class="visible">{{ getLast5Digits(item.phone) }}</span>
+                </span>
+              </div>
+              
+              <div class="row">
+                <span class="label">验证码</span>
+                <div class="code-wrapper">
+                  <span class="value code">{{ item.card_code }}</span>
+                  <button 
+                    v-if="item.card_code" 
+                    @click="copyCode(item.card_code)" 
+                    class="btn-copy"
+                    :class="{ 'copied': copiedCode === item.card_code }"
+                  >
+                    {{ copiedCode === item.card_code ? '已复制' : '复制' }}
+                  </button>
+                </div>
+              </div>
+              
+              <div class="row">
+                <span class="label">时间</span>
+                <span class="value time">{{ formatTime(item.created_at) }}</span>
+              </div>
+              
+              <div class="progress-bar">
+                <div 
+                  class="progress" 
+                  :style="{ width: (item.remainingTime / 120 * 100) + '%' }"
+                  :class="{ 'warning': item.remainingTime < 30 }"
+                ></div>
+              </div>
+              
+              <div class="countdown">{{ Math.ceil(item.remainingTime) }}秒后消失</div>
+            </div>
+            
+            <div v-if="visibleCodes.length === 0" class="empty">
+              暂无验证码数据
+            </div>
+          </div>
+          
+          <div class="status">
+            <span class="dot" :class="{ 'active': isPolling }"></span>
+            {{ isPolling ? '实时监控中' : '已暂停' }}
+          </div>
+        </div>
+        
+        <!-- 右侧：公告 -->
+        <div class="notice-section">
+          <div class="notice-card">
+            <h3>📢 常见问题解决方法</h3>
+            
+            <div class="notice-item">
+              <h4><strong>不来码验证码</strong></h4>
+              <p>检查我提供的手机号是否输入正确，区号是否改为美国+1。上述没问题，稍后一分钟再试（可以切换网络尝试一下）。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>手机号不存在</strong></h4>
+              <p>区号未改为美国+1。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>填入验证码提示错误</strong></h4>
+              <p>验证码超时或者重复点了两次，重新获取即可。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>登陆出现绑定</strong></h4>
+              <p>请返回取消，去应用商店更新一下腾讯视频版本即可直登。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>播放验证</strong></h4>
+              <p>切换主身份登陆播放视频，点立即验证网址接码即可恢复。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>掉线可以重登</strong></h4>
+              <p>本商品验证码链接一个月有效，可以重复登陆，掉线自行重登即可。</p>
+              <p>非直充，我提供账号给你登陆，五端通用，任选一台登陆，切换设备退出上一台。</p>
+              <p>电视只支持新版云视听极光，不支持NEW极光，不支持第三方定制的电视版本。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>如需登陆视频联系客服</strong></h4>
+            </div>
+            
+            <div class="notice-footer">
+              <p>非上述问题联系客服，异常可换号，不支持退款，谢谢。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="footer">验证码查询系统 v2.0</div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 
+const route = useRoute()
+
+// 判断是否是特定卡密查询模式（有card参数）
+const cardParam = computed(() => route.query.card as string | undefined)
+const isSpecificCardQuery = computed(() => !!cardParam.value)
+
+// ===== 实时验证码面板模式 =====
 // 原始数据
 const codes = ref<any[]>([])
 // 当前时间戳
@@ -127,6 +188,11 @@ const isPolling = ref(false)
 // 定时器
 let pollTimer: any = null
 let countdownTimer: any = null
+
+// ===== 特定卡密查询模式 =====
+const cardData = ref<any>(null)
+const cardLoading = ref(false)
+const cardError = ref('')
 
 // 每条显示2分钟（120秒）
 const DISPLAY_DURATION = 120
@@ -170,7 +236,7 @@ async function copyCode(code: string) {
   }
 }
 
-// 获取实时验证码
+// 获取实时验证码（面板模式）
 async function fetchLiveCodes() {
   try {
     // 使用新的短信验证码接口
@@ -192,6 +258,32 @@ async function fetchLiveCodes() {
   }
 }
 
+// 查询特定卡密
+async function fetchCardByToken(token: string) {
+  cardLoading.value = true
+  cardError.value = ''
+  try {
+    const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}`)
+    const json = await res.json()
+    if (json.code === 0 && json.data) {
+      cardData.value = {
+        phone: maskPhone(json.data.card_no || ''),
+        card_code: json.data.card_code,
+        expired_date: json.data.card_expired_date,
+        created_at: new Date().toISOString()
+      }
+    } else {
+      cardError.value = json.message || '未找到该卡密信息'
+      cardData.value = null
+    }
+  } catch (err) {
+    cardError.value = '查询失败，请稍后重试'
+    cardData.value = null
+  } finally {
+    cardLoading.value = false
+  }
+}
+
 // 手机号脱敏 - 显示后5位
 function maskPhone(phone: string): string {
   if (!phone || phone.length < 11) return phone || '—'
@@ -204,7 +296,7 @@ function getLast5Digits(phone: string): string {
   return phone.substring(phone.length - 5)
 }
 
-// 开始轮询
+// 开始轮询（面板模式）
 function startPolling() {
   isPolling.value = true
   fetchLiveCodes() // 立即获取一次
@@ -241,9 +333,15 @@ function formatTime(timeStr: string) {
 }
 
 onMounted(() => {
-  startPolling()
-  // 每秒更新倒计时
-  countdownTimer = setInterval(updateNow, 1000)
+  if (isSpecificCardQuery.value && cardParam.value) {
+    // 特定卡密查询模式
+    fetchCardByToken(cardParam.value)
+  } else {
+    // 实时验证码面板模式
+    startPolling()
+    // 每秒更新倒计时
+    countdownTimer = setInterval(updateNow, 1000)
+  }
 })
 
 onUnmounted(() => {
@@ -260,6 +358,46 @@ onUnmounted(() => {
   max-width: 1200px;
   margin: 20px 40px 20px auto;
   padding: 0 20px;
+}
+
+/* 特定卡密查询模式 */
+.specific-card-mode {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.specific-card-mode h2 {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+.error-message {
+  text-align: center;
+  padding: 40px;
+  color: #dc3545;
+  background: #f8f9fa;
+  border-radius: 12px;
+}
+
+.single-card {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.expired-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+  color: #999;
+  font-size: 13px;
+  text-align: center;
 }
 
 h2 {

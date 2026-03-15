@@ -360,7 +360,7 @@ watch(input, () => {
     if (!line) return
     const parts = line.split('----')
     // 格式校验：必须恰好两部分，卡号非空，链接符合 http 开头
-    if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim().startsWith('http')) {
+    if (parts.length !== 2 || !parts[0]?.trim() || !parts[1]?.trim().startsWith('http')) {
       errors.value.push(`第${idx + 1}行格式错误`)
     } else {
       count++
