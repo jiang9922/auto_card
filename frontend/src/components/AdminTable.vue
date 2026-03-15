@@ -58,7 +58,11 @@
           </th>
           <th>序号</th>
           <th>备注</th>
-          <th>卡号</th><th>链接</th><th>状态</th><th>添加时间</th>
+          <th>卡号</th>
+          <th>随机码</th>
+          <th>链接</th>
+          <th>状态</th>
+          <th>添加时间</th>
         </tr>
       </thead>
       <tbody>
@@ -69,6 +73,9 @@
           <td>
             {{ c.card_no }}
             <a :href="c.query_url || `/query?card=${c.card_no}`" class="query-link">查询</a>
+          </td>
+          <td>
+            <span class="random-code">{{ getRandomSuffix((c as any).query_token || '') }}</span>
           </td>
           <td>
             <a :href="c.card_link" target="_blank" class="link" :title="c.card_link">
@@ -410,6 +417,13 @@ function truncate(s: string, len: number) {
   return s.length > len ? s.slice(0, len) + '...' : s
 }
 
+// 从 query_token 提取随机后缀（6位随机字母）
+function getRandomSuffix(queryToken: any): string {
+  if (!queryToken) return '-'
+  const parts = String(queryToken).split('_')
+  return parts.length > 1 && parts[1] ? parts[1] : '-'
+}
+
 function formatDate(s: string) {
   // 显示日期（YYYY-MM-DD），异常时返回原字符串
   const d = new Date(s)
@@ -560,6 +574,18 @@ tr:hover { background:#f8f9fa; }
 .query-link:hover { text-decoration:underline; }
 .link { color:#007bff; text-decoration:none; }
 .link:hover { text-decoration:underline; }
+
+/* 随机码样式 */
+.random-code {
+  font-family: monospace;
+  font-weight: 600;
+  color: #007bff;
+  background: #f0f7ff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
 
 .time-cell { display:flex; flex-direction:column; gap:2px; font-size:13px; }
 .time-cell .date { color:#333; }
