@@ -37,8 +37,8 @@
         <div class="progress-bar">
           <div 
             class="progress" 
-            :style="{ width: (cardRemainingTime / 120 * 100) + '%' }"
-            :class="{ 'warning': cardRemainingTime < 30 }"
+            :style="{ width: (cardRemainingTime / 60 * 100) + '%' }"
+            :class="{ 'warning': cardRemainingTime < 15 }"
           ></div>
         </div>
         <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
@@ -220,11 +220,11 @@ const cardMatchedCode = computed(() => {
 })
 
 const cardFetchedAt = ref<number>(0)
-const cardRemainingTime = ref(120)
+const cardRemainingTime = ref(60)
 let cardCountdownTimer: any = null
 
-// 每条显示2分钟（120秒）
-const DISPLAY_DURATION = 120
+// 显示60秒
+const CARD_DISPLAY_DURATION = 60
 
 // 复制状态
 const copiedCode = ref('')
@@ -315,15 +315,12 @@ function getLast5Digits(phone: string): string {
   return phone.substring(phone.length - 5)
 }
 
-// 更新特定卡密倒计时
+// 更新特定卡密倒计时（基于短信创建时间）
 function updateCardCountdown() {
-  if (cardFetchedAt.value > 0) {
-    const elapsed = Math.floor((Date.now() - cardFetchedAt.value) / 1000)
-    cardRemainingTime.value = Math.max(0, 120 - elapsed)
-    // 2分钟后停止倒计时
-    if (cardRemainingTime.value <= 0) {
-      cardFetchedAt.value = 0
-    }
+  if (cardMatchedCode.value && cardMatchedCode.value.created_at) {
+    const createdTime = new Date(cardMatchedCode.value.created_at).getTime()
+    const elapsed = Math.floor((Date.now() - createdTime) / 1000)
+    cardRemainingTime.value = Math.max(0, CARD_DISPLAY_DURATION - elapsed)
   }
 }
 
@@ -371,7 +368,6 @@ onMounted(() => {
   
   // 特定卡密查询模式额外启动倒计时
   if (isSpecificCardQuery.value) {
-    cardFetchedAt.value = Date.now()
     cardCountdownTimer = setInterval(updateCardCountdown, 1000)
   }
 })
