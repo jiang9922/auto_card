@@ -156,7 +156,12 @@
         <!-- 用户筛选 -->
         <div class="user-filter" v-if="userIDList.length > 0">
           <label>用户筛选：</label>
-          <select v-model="selectedUserID" @change="onUserIDChange">
+          <select 
+            v-model="selectedUserID" 
+            @change="onUserIDChange"
+            @focus="isDropdownOpen = true"
+            @blur="isDropdownOpen = false"
+          >
             <option value="">全部用户</option>
             <option v-for="uid in userIDList" :key="uid" :value="uid">{{ uid || '未命名' }}</option>
           </select>
@@ -308,6 +313,7 @@ const copiedCode = ref('')
 // 用户筛选
 const userIDList = ref<string[]>([])
 const selectedUserID = ref('')
+const isDropdownOpen = ref(false) // 下拉框是否打开
 
 // 当用户选择变化时
 function onUserIDChange() {
@@ -376,6 +382,11 @@ async function copyCode(code: string) {
 // 获取实时验证码（面板模式）
 async function fetchLiveCodes() {
   try {
+    // 如果下拉框打开，跳过本次更新
+    if (isDropdownOpen.value) {
+      return
+    }
+    
     // 构建URL，如果有选择用户则添加过滤参数
     let url = '/api/sms/live'
     if (selectedUserID.value) {
