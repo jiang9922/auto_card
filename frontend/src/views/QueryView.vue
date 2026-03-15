@@ -153,6 +153,15 @@
       
       <!-- 验证码列表（验证通过后显示） -->
       <template v-else>
+        <!-- 用户筛选 -->
+        <div class="user-filter" v-if="userIDList.length > 0">
+          <label>用户筛选：</label>
+          <select v-model="selectedUserID" @change="onUserIDChange">
+            <option value="">全部用户</option>
+            <option v-for="uid in userIDList" :key="uid" :value="uid">{{ uid || '未命名' }}</option>
+          </select>
+        </div>
+        
         <div class="main-content center-content">
           <!-- 验证码列表居中 -->
           <div class="codes-section center-section">
@@ -296,6 +305,15 @@ const CARD_DISPLAY_DURATION = 56
 // 复制状态
 const copiedCode = ref('')
 
+// 用户筛选
+const userIDList = ref<string[]>([])
+const selectedUserID = ref('')
+
+// 当用户选择变化时
+function onUserIDChange() {
+  fetchLiveCodes()
+}
+
 // ===== 密码验证 =====
 const isVerified = ref(false)
 const inputPassword = ref('')
@@ -358,8 +376,13 @@ async function copyCode(code: string) {
 // 获取实时验证码（面板模式）
 async function fetchLiveCodes() {
   try {
-    // 使用新的短信验证码接口
-    const res = await fetch('/api/sms/live')
+    // 构建URL，如果有选择用户则添加过滤参数
+    let url = '/api/sms/live'
+    if (selectedUserID.value) {
+      url += `?user_id=${encodeURIComponent(selectedUserID.value)}`
+    }
+    
+    const res = await fetch(url)
     const json = await res.json()
     if (json.code === 0 && Array.isArray(json.data)) {
       // 转换数据格式
@@ -369,8 +392,18 @@ async function fetchLiveCodes() {
         card_code: item.code,
         created_at: item.created_at,
         from: item.from,
-        msg: item.msg
+        msg: item.msg,
+        user_id: item.user_id
       }))
+      
+      // 提取所有唯一的 user_id 用于下拉框
+      const uids = new Set<string>()
+      json.data.forEach((item: any) => {
+        if (item.user_id) {
+          uids.add(item.user_id)
+        }
+      })
+      userIDList.value = Array.from(uids)
     }
   } catch (err) {
     console.error('获取实时验证码失败:', err)
@@ -621,6 +654,42 @@ h2 {
   color: #999;
   font-size: 14px;
   margin-bottom: 24px;
+}
+
+/* 用户筛选 */
+.user-filter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 12px 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.user-filter label {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+.user-filter select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  min-width: 150px;
+  cursor: pointer;
+}
+
+.user-filter select:focus {
+  outline: none;
+  border-color: #4a90d9;
 }
 
 /* 主内容区：左右两栏 */

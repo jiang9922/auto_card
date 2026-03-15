@@ -777,6 +777,7 @@ type SMSCode struct {
 	Code      string    `json:"code"`
 	Msg       string    `json:"msg"`
 	From      string    `json:"from"`
+	UserID    string    `json:"user_id"` // 用户标识
 	CodeTime  string    `json:"code_time"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -867,6 +868,7 @@ func receiveSMSPush(c *gin.Context) {
 		Code:      code,
 		Msg:       req.Msg,
 		From:      fromStr,
+		UserID:    toString(req.UserID), // 用户标识
 		CodeTime:  req.CodeTime,
 		CreatedAt: time.Now(),
 	}
@@ -895,11 +897,18 @@ func getLiveSMSCodes(c *gin.Context) {
 	defer smsCacheMutex.RUnlock()
 
 	// 清理过期数据
-cleanExpiredSMSCodes()
+	cleanExpiredSMSCodes()
+
+	// 获取过滤参数
+	userID := c.Query("user_id")
 
 	// 转换为数组并按时间排序
 	var codes []*SMSCode
 	for _, sms := range smsCodeCache {
+		// 如果指定了 user_id，只返回匹配的
+		if userID != "" && sms.UserID != userID {
+			continue
+		}
 		codes = append(codes, sms)
 	}
 
