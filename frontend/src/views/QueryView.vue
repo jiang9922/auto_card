@@ -12,9 +12,7 @@
           <div v-if="cardLoading" class="code-card single-card">
             <div class="row">
               <span class="label">手机号</span>
-              <span class="value phone">
-                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardPhone) }}</span>
-              </span>
+              <span class="value phone">{{ cardPhone }}</span>
             </div>
             <div class="status-row">
               <span class="status-text waiting">验证中...</span>
@@ -25,9 +23,7 @@
           <div v-else-if="cardError" class="code-card single-card error-card">
             <div class="row">
               <span class="label">手机号</span>
-              <span class="value phone">
-                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardPhone) }}</span>
-              </span>
+              <span class="value phone">{{ cardPhone }}</span>
             </div>
             <div class="status-row">
               <span class="status-text error">{{ cardError }}</span>
@@ -38,9 +34,7 @@
           <div v-else-if="cardVerified" class="code-card single-card">
             <div class="row">
               <span class="label">手机号</span>
-              <span class="value phone">
-                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardMatchedCode?.phone || cardPhone) }}</span>
-              </span>
+              <span class="value phone">{{ cardMatchedCode?.phone || cardPhone }}</span>
             </div>
             
             <div v-if="cardMatchedCode && cardRemainingTime > 0">
@@ -171,9 +165,7 @@
             >
               <div class="row">
                 <span class="label">手机号</span>
-                <span class="value phone">
-                  <span class="masked">******</span><span class="visible">{{ getLast5Digits(item.phone) }}</span>
-                </span>
+                <span class="value phone">{{ item.phone }}</span>
               </div>
               
               <div class="row">
@@ -259,11 +251,10 @@ const cardMatchedCode = computed(() => {
   })
 })
 
-// 从查询参数提取手机号（用于始终显示）
+// 从查询参数提取手机号（用于始终显示）- 完整显示
 const cardPhone = computed(() => {
   const token = cardParam.value || ''
-  const pureCardNo = token.split('_')[0] || ''
-  return maskPhone(pureCardNo)
+  return token.split('_')[0] || ''
 })
 
 // 卡号验证状态
@@ -374,7 +365,7 @@ async function fetchLiveCodes() {
       // 转换数据格式
       codes.value = json.data.map((item: any) => ({
         id: item.id,
-        phone: maskPhone(item.phone),
+        phone: item.phone,
         card_code: item.code,
         created_at: item.created_at,
         from: item.from,
