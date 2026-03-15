@@ -280,14 +280,25 @@ async function fetchCardByToken(token: string) {
     const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}`)
     const json = await res.json()
     if (json.code === 0 && json.data) {
-      cardData.value = {
-        phone: maskPhone(json.data.card_no || ''),
-        card_code: json.data.card_code,
-        expired_date: json.data.card_expired_date,
-        created_at: new Date().toISOString()
+      const newPhone = maskPhone(json.data.card_no || '')
+      const newCode = json.data.card_code
+      
+      // 只在数据变化时才更新，避免闪烁
+      const hasChanged = !cardData.value || 
+        cardData.value.phone !== newPhone || 
+        cardData.value.card_code !== newCode
+      
+      if (hasChanged) {
+        cardData.value = {
+          phone: newPhone,
+          card_code: newCode,
+          expired_date: json.data.card_expired_date,
+          created_at: new Date().toISOString()
+        }
+        // 重置倒计时
+        cardFetchedAt.value = Date.now()
+        cardRemainingTime.value = 120
       }
-      cardFetchedAt.value = Date.now()
-      cardRemainingTime.value = 120
     } else {
       cardError.value = json.message || '未找到该卡密信息'
       cardData.value = null
