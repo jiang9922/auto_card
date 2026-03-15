@@ -317,6 +317,7 @@ const isDropdownOpen = ref(false) // 下拉框是否打开
 
 // 当用户选择变化时
 function onUserIDChange() {
+  isDropdownOpen.value = false // 强制关闭下拉框状态
   fetchLiveCodes()
 }
 
