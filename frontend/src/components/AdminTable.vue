@@ -458,12 +458,8 @@ function processInputWithOptions(text: string): string {
   
   // 排序
   if (sortMode.value === 'sequential') {
-    // 顺序排列：1234512345
-    processed = processed.sort((a, b) => {
-      const cardA = a.split('----')[0] || ''
-      const cardB = b.split('----')[0] || ''
-      return cardA.localeCompare(cardB)
-    })
+    // 顺序排列：保持原始输入顺序（不做排序）
+    // processed 保持原样
   } else if (sortMode.value === 'paired') {
     // 成对排列：1122334455
     processed = sortPaired(processed)
