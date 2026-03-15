@@ -318,10 +318,8 @@ const isDropdownOpen = ref(false) // 下拉框是否打开
 // 当用户选择变化时
 function onUserIDChange() {
   isDropdownOpen.value = false
-  // 延迟一点执行，确保下拉框状态已更新
-  setTimeout(() => {
-    fetchLiveCodes()
-  }, 10)
+  // 强制刷新，不走缓存比较
+  fetchLiveCodes(true)
 }
 
 // ===== 密码验证 =====
@@ -384,10 +382,10 @@ async function copyCode(code: string) {
 }
 
 // 获取实时验证码（面板模式）
-async function fetchLiveCodes() {
+async function fetchLiveCodes(force = false) {
   try {
-    // 如果下拉框打开，跳过本次更新
-    if (isDropdownOpen.value) {
+    // 如果下拉框打开且不是强制刷新，跳过本次更新
+    if (isDropdownOpen.value && !force) {
       return
     }
     
@@ -404,8 +402,8 @@ async function fetchLiveCodes() {
       const data = json.data.codes || json.data
       const userIDs = json.data.user_ids || []
       
-      // 只在数据变化时更新，避免不必要的重新渲染
-      const newCodes = data.map((item: any) => ({
+      // 转换数据格式
+      codes.value = data.map((item: any) => ({
         id: item.id,
         phone: item.phone,
         card_code: item.code,
@@ -414,11 +412,6 @@ async function fetchLiveCodes() {
         msg: item.msg,
         user_id: item.user_id
       }))
-      
-      // 比较数据是否真正变化
-      if (JSON.stringify(codes.value) !== JSON.stringify(newCodes)) {
-        codes.value = newCodes
-      }
       
       // 只在 user_id 列表变化时更新
       const currentUserIDs = JSON.stringify(userIDList.value.sort())
@@ -456,8 +449,8 @@ function updateCardCountdown() {
 // 开始轮询（面板模式）
 function startPolling() {
   isPolling.value = true
-  fetchLiveCodes() // 立即获取一次
-  pollTimer = setInterval(fetchLiveCodes, 1000) // 每1秒刷新
+  fetchLiveCodes() // 立即获取一次（非强制）
+  pollTimer = setInterval(() => fetchLiveCodes(), 1000) // 每1秒刷新（非强制）
 }
 
 // 停止轮询
