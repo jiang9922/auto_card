@@ -321,12 +321,19 @@ function verifyPassword() {
   }
 }
 
-// 可见的验证码列表（后端已按时间过滤，前端直接显示）
+// 可见的验证码列表（根据创建时间计算剩余时间）
 const visibleCodes = computed(() => {
-  return codes.value.map(item => ({
-    ...item,
-    remainingTime: 60 // 固定显示1分钟倒计时
-  }))
+  // 使用 now.value 确保每秒重新计算
+  const currentTime = now.value || Date.now()
+  return codes.value.map(item => {
+    const createdTime = new Date(item.created_at).getTime()
+    const elapsed = Math.floor((currentTime - createdTime) / 1000)
+    const remaining = Math.max(0, 60 - elapsed) // 60秒倒计时
+    return {
+      ...item,
+      remainingTime: remaining
+    }
+  })
 })
 
 // 复制验证码
