@@ -165,7 +165,7 @@ func getAllCards(c *gin.Context) {
 	}
 
 	if pageSizeStr != "" {
-		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 200 {
 			pageSize = ps
 		}
 	}
@@ -296,7 +296,7 @@ func getLiveCodes(c *gin.Context) {
 	limitStr := c.Query("limit")
 	limit := 20
 	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 200 {
 			limit = l
 		}
 	}
