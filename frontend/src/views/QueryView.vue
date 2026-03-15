@@ -8,51 +8,80 @@
       <div class="main-content">
         <!-- 左侧：验证码卡片 -->
         <div class="codes-section">
-          <div v-if="cardMatchedCode && cardRemainingTime > 0" class="code-card single-card">
+          <!-- 验证中 -->
+          <div v-if="cardLoading" class="code-card single-card">
             <div class="row">
               <span class="label">手机号</span>
               <span class="value phone">
-                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardMatchedCode.phone) }}</span>
+                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardPhone) }}</span>
+              </span>
+            </div>
+            <div class="status-row">
+              <span class="status-text waiting">验证中...</span>
+            </div>
+          </div>
+          
+          <!-- 手机号不存在 -->
+          <div v-else-if="cardError" class="code-card single-card error-card">
+            <div class="row">
+              <span class="label">手机号</span>
+              <span class="value phone">
+                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardPhone) }}</span>
+              </span>
+            </div>
+            <div class="status-row">
+              <span class="status-text error">{{ cardError }}</span>
+            </div>
+          </div>
+          
+          <!-- 卡号存在，显示验证码 -->
+          <div v-else-if="cardVerified" class="code-card single-card">
+            <div class="row">
+              <span class="label">手机号</span>
+              <span class="value phone">
+                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardMatchedCode?.phone || cardPhone) }}</span>
               </span>
             </div>
             
-            <div class="row">
-              <span class="label">验证码</span>
-              <div class="code-wrapper">
-                <span class="value code">{{ cardMatchedCode.card_code || '暂无验证码' }}</span>
-                <button 
-                  v-if="cardMatchedCode.card_code" 
-                  @click="copyCode(cardMatchedCode.card_code)" 
-                  class="btn-copy"
-                  :class="{ 'copied': copiedCode === cardMatchedCode.card_code }"
-                >
-                  {{ copiedCode === cardMatchedCode.card_code ? '已复制' : '复制' }}
-                </button>
+            <div v-if="cardMatchedCode && cardRemainingTime > 0">
+              <div class="row">
+                <span class="label">验证码</span>
+                <div class="code-wrapper">
+                  <span class="value code">{{ cardMatchedCode.card_code || '暂无验证码' }}</span>
+                  <button 
+                    v-if="cardMatchedCode.card_code" 
+                    @click="copyCode(cardMatchedCode.card_code)" 
+                    class="btn-copy"
+                    :class="{ 'copied': copiedCode === cardMatchedCode.card_code }"
+                  >
+                    {{ copiedCode === cardMatchedCode.card_code ? '已复制' : '复制' }}
+                  </button>
+                </div>
               </div>
+              
+              <div class="row">
+                <span class="label">时间</span>
+                <span class="value time">{{ formatTime(cardMatchedCode.created_at) }}</span>
+              </div>
+              
+              <!-- 倒计时进度条 -->
+              <div class="progress-bar">
+                <div 
+                  class="progress" 
+                  :style="{ width: (cardRemainingTime / 56 * 100) + '%' }"
+                  :class="{ 'warning': cardRemainingTime < 15 }"
+                ></div>
+              </div>
+              <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
             </div>
             
-            <div class="row">
-              <span class="label">时间</span>
-              <span class="value time">{{ formatTime(cardMatchedCode.created_at) }}</span>
+            <div v-else-if="cardMatchedCode && cardRemainingTime <= 0" class="status-row">
+              <span class="status-text expired">验证码已过期，请重新获取</span>
             </div>
             
-            <!-- 倒计时进度条 -->
-            <div class="progress-bar">
-              <div 
-                class="progress" 
-                :style="{ width: (cardRemainingTime / 56 * 100) + '%' }"
-                :class="{ 'warning': cardRemainingTime < 15 }"
-              ></div>
+            <div v-else class="status-row">
+              <span class="status-text waiting">暂无验证码，请稍候...</span>
             </div>
-            <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
-          </div>
-          
-          <div v-else-if="cardMatchedCode && cardRemainingTime <= 0" class="empty expired">
-            验证码已过期，请重新获取
-          </div>
-          
-          <div v-else class="empty">
-            暂无验证码数据
           </div>
         </div>
         
@@ -277,6 +306,42 @@ const cardMatchedCode = computed(() => {
   })
 })
 
+// 从查询参数提取手机号（用于始终显示）
+const cardPhone = computed(() => {
+  const token = cardParam.value || ''
+  const pureCardNo = token.split('_')[0] || ''
+  return maskPhone(pureCardNo)
+})
+
+// 卡号验证状态
+const cardLoading = ref(false)
+const cardVerified = ref(false)
+const cardError = ref('')
+
+// 验证卡号是否存在（类似 card_v01 的逻辑）
+async function verifyCard(token: string) {
+  cardLoading.value = true
+  cardError.value = ''
+  cardVerified.value = false
+  
+  try {
+    const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}`)
+    const json = await res.json()
+    
+    if (json.code === 0 && json.data) {
+      // 卡号存在
+      cardVerified.value = true
+    } else {
+      // 卡号不存在
+      cardError.value = json.message || '手机号不存在'
+    }
+  } catch (err) {
+    cardError.value = '验证失败'
+  } finally {
+    cardLoading.value = false
+  }
+}
+
 const cardFetchedAt = ref<number>(0)
 const cardRemainingTime = ref(56)
 let cardCountdownTimer: any = null
@@ -424,9 +489,12 @@ onMounted(() => {
   // 每秒更新倒计时
   countdownTimer = setInterval(updateNow, 1000)
   
-  // 特定卡密查询模式额外启动倒计时
-  if (isSpecificCardQuery.value) {
+  // 特定卡密查询模式额外启动倒计时和验证卡号
+  const cardQuery = route.query.card as string | undefined
+  if (cardQuery) {
     cardCountdownTimer = setInterval(updateCardCountdown, 1000)
+    // 验证卡号是否存在
+    verifyCard(cardQuery)
   }
 })
 
