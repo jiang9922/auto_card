@@ -37,7 +37,7 @@
         <div class="progress-bar">
           <div 
             class="progress" 
-            :style="{ width: (cardRemainingTime / 60 * 100) + '%' }"
+            :style="{ width: (cardRemainingTime / 56 * 100) + '%' }"
             :class="{ 'warning': cardRemainingTime < 15 }"
           ></div>
         </div>
@@ -220,11 +220,11 @@ const cardMatchedCode = computed(() => {
 })
 
 const cardFetchedAt = ref<number>(0)
-const cardRemainingTime = ref(60)
+const cardRemainingTime = ref(56)
 let cardCountdownTimer: any = null
 
-// 显示60秒
-const CARD_DISPLAY_DURATION = 60
+// 显示56秒
+const CARD_DISPLAY_DURATION = 56
 
 // 复制状态
 const copiedCode = ref('')
