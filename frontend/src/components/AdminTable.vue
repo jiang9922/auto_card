@@ -110,11 +110,28 @@
       <textarea v-model="input" placeholder="888888----http://localhost:8081/api12828798dss
 888888----http://localhost:8081/api871282"></textarea>
       <div class="add-options">
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="allowDuplicates" />
-          <span>允许重复添加（同一卡号可生成多个查询链接）</span>
-        </label>
-        <input type="text" v-model="batchRemark" placeholder="批量备注（可选）" class="inline-remark-input" />
+        <div class="option-row">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="allowDuplicates" />
+            <span>允许重复添加（同一卡号可生成多个查询链接）</span>
+          </label>
+        </div>
+        <div class="option-row">
+          <label>添加倍数：</label>
+          <input type="number" v-model.number="addMultiplier" min="1" max="10" class="multiplier-input" />
+          <span class="hint">每条卡密复制{{ addMultiplier }}份</span>
+        </div>
+        <div class="option-row">
+          <label>排序方式：</label>
+          <select v-model="sortMode" class="sort-select">
+            <option value="sequential">顺序排列 (1234512345)</option>
+            <option value="paired">成对排列 (1122334455)</option>
+            <option value="random">随机乱序</option>
+          </select>
+        </div>
+        <div class="option-row">
+          <input type="text" v-model="batchRemark" placeholder="批量备注（可选）" class="inline-remark-input" />
+        </div>
       </div>
       <div class="validate">
         <span class="ok">有效 {{ validCount }} 条</span>
@@ -161,6 +178,8 @@ const adding = ref(false)
 const msg = ref('')
 const msgType = ref('')
 const allowDuplicates = ref(false) // 默认不允许重复添加
+const addMultiplier = ref(1) // 添加倍数，默认1倍
+const sortMode = ref('sequential') // 排序方式：sequential/paired/random
 const batchRemark = ref('') // 批量备注
 // 选中项与校验错误统计
 const selected = ref<number[]>([])
@@ -382,11 +401,14 @@ async function add() {
   adding.value = true
   msg.value = ''
   try {
+    // 处理输入：按倍数复制并排序
+    const processedText = processInputWithOptions(input.value)
+    
     const res = await fetch('/api/cards', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        text: input.value,
+        text: processedText,
         allow_duplicates: allowDuplicates.value,
         remark: batchRemark.value
       })
@@ -422,6 +444,69 @@ function getRandomSuffix(queryToken: any): string {
   if (!queryToken) return '-'
   const parts = String(queryToken).split('_')
   return parts.length > 1 && parts[1] ? parts[1] : '-'
+}
+
+// 处理输入：按倍数复制并排序
+function processInputWithOptions(text: string): string {
+  const lines = text.split('\n').filter(line => line.trim())
+  let processed: string[] = []
+  
+  // 按倍数复制
+  for (let i = 0; i < addMultiplier.value; i++) {
+    processed.push(...lines)
+  }
+  
+  // 排序
+  if (sortMode.value === 'sequential') {
+    // 顺序排列：1234512345
+    processed = processed.sort((a, b) => {
+      const cardA = a.split('----')[0] || ''
+      const cardB = b.split('----')[0] || ''
+      return cardA.localeCompare(cardB)
+    })
+  } else if (sortMode.value === 'paired') {
+    // 成对排列：1122334455
+    processed = sortPaired(processed)
+  } else if (sortMode.value === 'random') {
+    // 随机乱序
+    processed = shuffleArray(processed)
+  }
+  
+  return processed.join('\n')
+}
+
+// 成对排序：将相同的卡号放在一起
+function sortPaired(lines: string[]): string[] {
+  const groups: Record<string, string[]> = {}
+  
+  lines.forEach(line => {
+    const cardNo = line.split('----')[0] || ''
+    if (!groups[cardNo]) groups[cardNo] = []
+    groups[cardNo].push(line)
+  })
+  
+  const result: string[] = []
+  Object.keys(groups).sort().forEach(cardNo => {
+    const group = groups[cardNo]
+    if (group) result.push(...group)
+  })
+  
+  return result
+}
+
+// 随机乱序
+function shuffleArray(array: string[]): string[] {
+  const result: string[] = [...array]
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    // @ts-ignore
+    const temp = result[i]
+    // @ts-ignore
+    result[i] = result[j]
+    // @ts-ignore
+    result[j] = temp
+  }
+  return result
 }
 
 function formatDate(s: string) {
@@ -627,9 +712,44 @@ tr:hover { background:#f8f9fa; }
 .add-options {
   margin: 12px 0;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.option-row {
+  display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 12px;
   flex-wrap: wrap;
+}
+
+.option-row label {
+  font-weight: 500;
+  color: #555;
+  font-size: 14px;
+  min-width: 80px;
+}
+
+.multiplier-input {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 60px;
+  text-align: center;
+}
+
+.sort-select {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  min-width: 200px;
+}
+
+.hint {
+  color: #888;
+  font-size: 13px;
 }
 
 .inline-remark-input {
