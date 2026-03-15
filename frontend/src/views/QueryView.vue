@@ -13,7 +13,7 @@
         {{ cardError }}
       </div>
       
-      <div v-else-if="cardData" class="code-card single-card">
+      <div v-else-if="cardData" class="code-card single-card" :class="{ 'expiring': cardRemainingTime < 30 }">
         <div class="row">
           <span class="label">手机号</span>
           <span class="value phone">
@@ -40,6 +40,16 @@
           <span class="label">时间</span>
           <span class="value time">{{ formatTime(cardData.created_at) }}</span>
         </div>
+        
+        <!-- 倒计时进度条 -->
+        <div class="progress-bar">
+          <div 
+            class="progress" 
+            :style="{ width: (cardRemainingTime / 120 * 100) + '%' }"
+            :class="{ 'warning': cardRemainingTime < 30 }"
+          ></div>
+        </div>
+        <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
         
         <div v-if="cardData.expired_date" class="expired-info">
           过期时间：{{ formatTime(cardData.expired_date) }}
@@ -193,7 +203,10 @@ let countdownTimer: any = null
 const cardData = ref<any>(null)
 const cardLoading = ref(false)
 const cardError = ref('')
+const cardFetchedAt = ref<number>(0) // 记录获取时间
+const cardRemainingTime = ref(120) // 剩余显示时间
 let cardPollTimer: any = null
+let cardCountdownTimer: any = null
 
 // 每条显示2分钟（120秒）
 const DISPLAY_DURATION = 120
@@ -273,6 +286,8 @@ async function fetchCardByToken(token: string) {
         expired_date: json.data.card_expired_date,
         created_at: new Date().toISOString()
       }
+      cardFetchedAt.value = Date.now()
+      cardRemainingTime.value = 120
     } else {
       cardError.value = json.message || '未找到该卡密信息'
       cardData.value = null
@@ -310,6 +325,18 @@ function stopCardPolling() {
   if (cardPollTimer) {
     clearInterval(cardPollTimer)
     cardPollTimer = null
+  }
+}
+
+// 更新特定卡密倒计时
+function updateCardCountdown() {
+  if (cardFetchedAt.value > 0) {
+    const elapsed = Math.floor((Date.now() - cardFetchedAt.value) / 1000)
+    cardRemainingTime.value = Math.max(0, 120 - elapsed)
+    // 2分钟后清空数据
+    if (cardRemainingTime.value <= 0) {
+      cardData.value = null
+    }
   }
 }
 
@@ -353,6 +380,8 @@ onMounted(() => {
   if (isSpecificCardQuery.value && cardParam.value) {
     // 特定卡密查询模式 - 启动轮询
     startCardPolling(cardParam.value)
+    // 启动倒计时
+    cardCountdownTimer = setInterval(updateCardCountdown, 1000)
   } else {
     // 实时验证码面板模式
     startPolling()
@@ -367,6 +396,10 @@ onUnmounted(() => {
   if (countdownTimer) {
     clearInterval(countdownTimer)
     countdownTimer = null
+  }
+  if (cardCountdownTimer) {
+    clearInterval(cardCountdownTimer)
+    cardCountdownTimer = null
   }
 })
 </script>
