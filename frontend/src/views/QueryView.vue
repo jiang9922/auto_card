@@ -5,40 +5,32 @@
     <div v-if="isSpecificCardQuery" class="specific-card-mode">
       <h2>验证码查询</h2>
       
-      <div v-if="cardLoading" class="loading">
-        查询中...
-      </div>
-      
-      <div v-else-if="cardError" class="error-message">
-        {{ cardError }}
-      </div>
-      
-      <div v-else-if="cardData" class="code-card single-card">
+      <div v-if="cardMatchedCode" class="code-card single-card">
         <div class="row">
           <span class="label">手机号</span>
           <span class="value phone">
-            <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardData.phone) }}</span>
+            <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardMatchedCode.phone) }}</span>
           </span>
         </div>
         
         <div class="row">
           <span class="label">验证码</span>
           <div class="code-wrapper">
-            <span class="value code">{{ cardData.card_code || '暂无验证码' }}</span>
+            <span class="value code">{{ cardMatchedCode.card_code || '暂无验证码' }}</span>
             <button 
-              v-if="cardData.card_code" 
-              @click="copyCode(cardData.card_code)" 
+              v-if="cardMatchedCode.card_code" 
+              @click="copyCode(cardMatchedCode.card_code)" 
               class="btn-copy"
-              :class="{ 'copied': copiedCode === cardData.card_code }"
+              :class="{ 'copied': copiedCode === cardMatchedCode.card_code }"
             >
-              {{ copiedCode === cardData.card_code ? '已复制' : '复制' }}
+              {{ copiedCode === cardMatchedCode.card_code ? '已复制' : '复制' }}
             </button>
           </div>
         </div>
         
         <div class="row">
           <span class="label">时间</span>
-          <span class="value time">{{ formatTime(cardData.created_at) }}</span>
+          <span class="value time">{{ formatTime(cardMatchedCode.created_at) }}</span>
         </div>
         
         <!-- 倒计时进度条 -->
@@ -50,14 +42,10 @@
           ></div>
         </div>
         <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
-        
-        <div v-if="cardData.expired_date" class="expired-info">
-          过期时间：{{ formatTime(cardData.expired_date) }}
-        </div>
       </div>
       
       <div v-else class="empty">
-        暂无数据
+        暂无验证码数据
       </div>
     </div>
     
@@ -200,12 +188,20 @@ let pollTimer: any = null
 let countdownTimer: any = null
 
 // ===== 特定卡密查询模式 =====
-const cardData = ref<any>(null)
-const cardLoading = ref(false)
-const cardError = ref('')
-const cardFetchedAt = ref<number>(0) // 记录获取时间
-const cardRemainingTime = ref(120) // 剩余显示时间
-let cardPollTimer: any = null
+const cardMatchedCode = computed(() => {
+  // 从 query_token 提取纯卡号（去掉 _随机后缀）
+  const token = cardParam.value || ''
+  const pureCardNo = token.split('_')[0] || ''
+  
+  // 在实时验证码中查找匹配的（后5位匹配即可）
+  return codes.value.find(item => {
+    const itemLast5 = item.phone.slice(-5)
+    return itemLast5 === pureCardNo.slice(-5)
+  })
+})
+
+const cardFetchedAt = ref<number>(0)
+const cardRemainingTime = ref(120)
 let cardCountdownTimer: any = null
 
 // 每条显示2分钟（120秒）
@@ -272,45 +268,6 @@ async function fetchLiveCodes() {
   }
 }
 
-// 查询特定卡密
-async function fetchCardByToken(token: string) {
-  cardLoading.value = true
-  cardError.value = ''
-  try {
-    const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}`)
-    const json = await res.json()
-    if (json.code === 0 && json.data) {
-      const newPhone = maskPhone(json.data.card_no || '')
-      const newCode = json.data.card_code
-      
-      // 只在数据变化时才更新，避免闪烁
-      const hasChanged = !cardData.value || 
-        cardData.value.phone !== newPhone || 
-        cardData.value.card_code !== newCode
-      
-      if (hasChanged) {
-        cardData.value = {
-          phone: newPhone,
-          card_code: newCode,
-          expired_date: json.data.card_expired_date,
-          created_at: new Date().toISOString()
-        }
-        // 重置倒计时
-        cardFetchedAt.value = Date.now()
-        cardRemainingTime.value = 120
-      }
-    } else {
-      cardError.value = json.message || '未找到该卡密信息'
-      cardData.value = null
-    }
-  } catch (err) {
-    cardError.value = '查询失败，请稍后重试'
-    cardData.value = null
-  } finally {
-    cardLoading.value = false
-  }
-}
-
 // 手机号脱敏 - 显示后5位
 function maskPhone(phone: string): string {
   if (!phone || phone.length < 11) return phone || '—'
@@ -323,30 +280,14 @@ function getLast5Digits(phone: string): string {
   return phone.substring(phone.length - 5)
 }
 
-// 开始特定卡密轮询
-function startCardPolling(token: string) {
-  fetchCardByToken(token) // 立即获取一次
-  cardPollTimer = setInterval(() => {
-    fetchCardByToken(token)
-  }, 3000) // 每3秒刷新一次
-}
-
-// 停止特定卡密轮询
-function stopCardPolling() {
-  if (cardPollTimer) {
-    clearInterval(cardPollTimer)
-    cardPollTimer = null
-  }
-}
-
 // 更新特定卡密倒计时
 function updateCardCountdown() {
   if (cardFetchedAt.value > 0) {
     const elapsed = Math.floor((Date.now() - cardFetchedAt.value) / 1000)
     cardRemainingTime.value = Math.max(0, 120 - elapsed)
-    // 2分钟后清空数据
+    // 2分钟后停止倒计时
     if (cardRemainingTime.value <= 0) {
-      cardData.value = null
+      cardFetchedAt.value = 0
     }
   }
 }
@@ -388,22 +329,20 @@ function formatTime(timeStr: string) {
 }
 
 onMounted(() => {
-  if (isSpecificCardQuery.value && cardParam.value) {
-    // 特定卡密查询模式 - 启动轮询
-    startCardPolling(cardParam.value)
-    // 启动倒计时
+  // 所有模式都启动实时验证码轮询
+  startPolling()
+  // 每秒更新倒计时
+  countdownTimer = setInterval(updateNow, 1000)
+  
+  // 特定卡密查询模式额外启动倒计时
+  if (isSpecificCardQuery.value) {
+    cardFetchedAt.value = Date.now()
     cardCountdownTimer = setInterval(updateCardCountdown, 1000)
-  } else {
-    // 实时验证码面板模式
-    startPolling()
-    // 每秒更新倒计时
-    countdownTimer = setInterval(updateNow, 1000)
   }
 })
 
 onUnmounted(() => {
   stopPolling()
-  stopCardPolling()
   if (countdownTimer) {
     clearInterval(countdownTimer)
     countdownTimer = null
