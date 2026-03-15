@@ -902,14 +902,27 @@ func getLiveSMSCodes(c *gin.Context) {
 	// 获取过滤参数
 	userID := c.Query("user_id")
 
+	// 收集所有唯一的 user_id
+	userIDSet := make(map[string]bool)
+
 	// 转换为数组并按时间排序
 	var codes []*SMSCode
 	for _, sms := range smsCodeCache {
+		// 收集所有 user_id
+		if sms.UserID != "" {
+			userIDSet[sms.UserID] = true
+		}
 		// 如果指定了 user_id，只返回匹配的
 		if userID != "" && sms.UserID != userID {
 			continue
 		}
 		codes = append(codes, sms)
+	}
+
+	// 将 user_id 集合转换为数组
+	var allUserIDs []string
+	for uid := range userIDSet {
+		allUserIDs = append(allUserIDs, uid)
 	}
 
 	// 按创建时间倒序排列
@@ -920,7 +933,10 @@ func getLiveSMSCodes(c *gin.Context) {
 	c.JSON(200, Response{
 		Code:    0,
 		Message: "success",
-		Data:    codes,
+		Data: map[string]interface{}{
+			"codes":     codes,
+			"user_ids":  allUserIDs,
+		},
 	})
 }
 

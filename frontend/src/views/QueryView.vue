@@ -384,9 +384,13 @@ async function fetchLiveCodes() {
     
     const res = await fetch(url)
     const json = await res.json()
-    if (json.code === 0 && Array.isArray(json.data)) {
+    if (json.code === 0 && json.data) {
+      // 新的数据结构: { codes: [], user_ids: [] }
+      const data = json.data.codes || json.data
+      const userIDs = json.data.user_ids || []
+      
       // 转换数据格式
-      codes.value = json.data.map((item: any) => ({
+      codes.value = data.map((item: any) => ({
         id: item.id,
         phone: item.phone,
         card_code: item.code,
@@ -396,14 +400,8 @@ async function fetchLiveCodes() {
         user_id: item.user_id
       }))
       
-      // 提取所有唯一的 user_id 用于下拉框
-      const uids = new Set<string>()
-      json.data.forEach((item: any) => {
-        if (item.user_id) {
-          uids.add(item.user_id)
-        }
-      })
-      userIDList.value = Array.from(uids)
+      // 使用后端返回的所有 user_id 更新下拉框
+      userIDList.value = userIDs
     }
   } catch (err) {
     console.error('获取实时验证码失败:', err)
