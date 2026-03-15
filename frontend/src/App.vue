@@ -2,7 +2,7 @@
 <template>
   <div class="app">
 <nav class="nav">
-  <router-link to="/query" class="nav-link">实时验证码</router-link>
+  <!-- 实时验证码入口已屏蔽 -->
   <!-- 后台登录入口已屏蔽 -->
   <router-link v-if="authed && !isQueryPage" to="/admin/manage" class="nav-link">管理后台</router-link>
 </nav>

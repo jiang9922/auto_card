@@ -193,6 +193,7 @@ let countdownTimer: any = null
 const cardData = ref<any>(null)
 const cardLoading = ref(false)
 const cardError = ref('')
+let cardPollTimer: any = null
 
 // 每条显示2分钟（120秒）
 const DISPLAY_DURATION = 120
@@ -296,6 +297,22 @@ function getLast5Digits(phone: string): string {
   return phone.substring(phone.length - 5)
 }
 
+// 开始特定卡密轮询
+function startCardPolling(token: string) {
+  fetchCardByToken(token) // 立即获取一次
+  cardPollTimer = setInterval(() => {
+    fetchCardByToken(token)
+  }, 3000) // 每3秒刷新一次
+}
+
+// 停止特定卡密轮询
+function stopCardPolling() {
+  if (cardPollTimer) {
+    clearInterval(cardPollTimer)
+    cardPollTimer = null
+  }
+}
+
 // 开始轮询（面板模式）
 function startPolling() {
   isPolling.value = true
@@ -334,8 +351,8 @@ function formatTime(timeStr: string) {
 
 onMounted(() => {
   if (isSpecificCardQuery.value && cardParam.value) {
-    // 特定卡密查询模式
-    fetchCardByToken(cardParam.value)
+    // 特定卡密查询模式 - 启动轮询
+    startCardPolling(cardParam.value)
   } else {
     // 实时验证码面板模式
     startPolling()
@@ -346,6 +363,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
+  stopCardPolling()
   if (countdownTimer) {
     clearInterval(countdownTimer)
     countdownTimer = null
