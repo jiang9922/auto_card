@@ -8,7 +8,7 @@
       <div class="main-content">
         <!-- 左侧：验证码卡片 -->
         <div class="codes-section">
-          <div v-if="cardMatchedCode" class="code-card single-card">
+          <div v-if="cardMatchedCode && cardRemainingTime > 0" class="code-card single-card">
             <div class="row">
               <span class="label">手机号</span>
               <span class="value phone">
@@ -45,6 +45,10 @@
               ></div>
             </div>
             <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
+          </div>
+          
+          <div v-else-if="cardMatchedCode && cardRemainingTime <= 0" class="empty expired">
+            验证码已过期，请重新获取
           </div>
           
           <div v-else class="empty">
@@ -909,6 +913,12 @@ h2 {
   color: #999;
   background: #f8f9fa;
   border-radius: 12px;
+}
+
+.empty.expired {
+  color: #dc3545;
+  background: #fff5f5;
+  border: 1px solid #ffcdd2;
 }
 
 .status {
