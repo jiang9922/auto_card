@@ -5,48 +5,102 @@
     <div v-if="isSpecificCardQuery" class="specific-card-mode">
       <h2>验证码查询</h2>
       
-      <div v-if="cardMatchedCode" class="code-card single-card">
-        <div class="row">
-          <span class="label">手机号</span>
-          <span class="value phone">
-            <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardMatchedCode.phone) }}</span>
-          </span>
-        </div>
-        
-        <div class="row">
-          <span class="label">验证码</span>
-          <div class="code-wrapper">
-            <span class="value code">{{ cardMatchedCode.card_code || '暂无验证码' }}</span>
-            <button 
-              v-if="cardMatchedCode.card_code" 
-              @click="copyCode(cardMatchedCode.card_code)" 
-              class="btn-copy"
-              :class="{ 'copied': copiedCode === cardMatchedCode.card_code }"
-            >
-              {{ copiedCode === cardMatchedCode.card_code ? '已复制' : '复制' }}
-            </button>
+      <div class="main-content">
+        <!-- 左侧：验证码卡片 -->
+        <div class="codes-section">
+          <div v-if="cardMatchedCode" class="code-card single-card">
+            <div class="row">
+              <span class="label">手机号</span>
+              <span class="value phone">
+                <span class="masked">******</span><span class="visible">{{ getLast5Digits(cardMatchedCode.phone) }}</span>
+              </span>
+            </div>
+            
+            <div class="row">
+              <span class="label">验证码</span>
+              <div class="code-wrapper">
+                <span class="value code">{{ cardMatchedCode.card_code || '暂无验证码' }}</span>
+                <button 
+                  v-if="cardMatchedCode.card_code" 
+                  @click="copyCode(cardMatchedCode.card_code)" 
+                  class="btn-copy"
+                  :class="{ 'copied': copiedCode === cardMatchedCode.card_code }"
+                >
+                  {{ copiedCode === cardMatchedCode.card_code ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+            
+            <div class="row">
+              <span class="label">时间</span>
+              <span class="value time">{{ formatTime(cardMatchedCode.created_at) }}</span>
+            </div>
+            
+            <!-- 倒计时进度条 -->
+            <div class="progress-bar">
+              <div 
+                class="progress" 
+                :style="{ width: (cardRemainingTime / 56 * 100) + '%' }"
+                :class="{ 'warning': cardRemainingTime < 15 }"
+              ></div>
+            </div>
+            <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
+          </div>
+          
+          <div v-else class="empty">
+            暂无验证码数据
           </div>
         </div>
         
-        <div class="row">
-          <span class="label">时间</span>
-          <span class="value time">{{ formatTime(cardMatchedCode.created_at) }}</span>
+        <!-- 右侧：公告 -->
+        <div class="notice-section">
+          <div class="notice-card">
+            <h3>📢 常见问题解决方法</h3>
+            
+            <div class="notice-item">
+              <h4><strong>不来码验证码</strong></h4>
+              <p>检查我提供的手机号是否输入正确，区号是否改为美国+1。上述没问题，稍后一分钟再试（可以切换网络尝试一下）。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>手机号不存在</strong></h4>
+              <p>区号未改为美国+1。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>填入验证码提示错误</strong></h4>
+              <p>验证码超时或者重复点了两次，重新获取即可。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>登陆出现绑定</strong></h4>
+              <p>请返回取消，去应用商店更新一下腾讯视频版本即可直登。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>播放验证</strong></h4>
+              <p>切换主身份登陆播放视频，点立即验证网址接码即可恢复。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>掉线可以重登</strong></h4>
+              <p>本商品验证码链接一个月有效，可以重复登陆，掉线自行重登即可。</p>
+              <p>非直充，我提供账号给你登陆，五端通用，任选一台登陆，切换设备退出上一台。</p>
+              <p>电视只支持新版云视听极光，不支持NEW极光，不支持第三方定制的电视版本。</p>
+            </div>
+            
+            <div class="notice-item">
+              <h4><strong>如需登陆视频联系客服</strong></h4>
+            </div>
+            
+            <div class="notice-footer">
+              <p>非上述问题联系客服，异常可换号，不支持退款，谢谢。</p>
+            </div>
+          </div>
         </div>
-        
-        <!-- 倒计时进度条 -->
-        <div class="progress-bar">
-          <div 
-            class="progress" 
-            :style="{ width: (cardRemainingTime / 56 * 100) + '%' }"
-            :class="{ 'warning': cardRemainingTime < 15 }"
-          ></div>
-        </div>
-        <div class="countdown">{{ Math.ceil(cardRemainingTime) }}秒后消失</div>
       </div>
       
-      <div v-else class="empty">
-        暂无验证码数据
-      </div>
+      <div class="footer">验证码查询系统 v2.0</div>
     </div>
     
     <!-- 实时验证码面板模式 -->
@@ -394,14 +448,57 @@ onUnmounted(() => {
 
 /* 特定卡密查询模式 */
 .specific-card-mode {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: 20px;
+  max-width: 1200px;
+  margin: 20px 40px 20px auto;
+  padding: 0 20px;
 }
 
 .specific-card-mode h2 {
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
+}
+
+.specific-card-mode .main-content {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.specific-card-mode .codes-section {
+  flex: 1;
+  max-width: 600px;
+}
+
+.specific-card-mode .notice-section {
+  width: 350px;
+  flex-shrink: 0;
+}
+
+/* 移动端适配 */
+@media (max-width: 900px) {
+  .specific-card-mode {
+    margin: 10px auto;
+    padding: 0 12px;
+  }
+  
+  .specific-card-mode h2 {
+    font-size: 20px;
+    margin-bottom: 16px;
+  }
+  
+  .specific-card-mode .main-content {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .specific-card-mode .codes-section {
+    max-width: 100%;
+    width: 100%;
+  }
+  
+  .specific-card-mode .notice-section {
+    width: 100%;
+  }
 }
 
 /* 密码验证 */
