@@ -664,6 +664,36 @@ func deleteBackup(c *gin.Context) {
 	c.JSON(200, Response{Code: 0, Message: "删除成功"})
 }
 
+// 下载备份文件
+func downloadBackup(c *gin.Context) {
+	name := c.Query("name")
+	if name == "" {
+		c.JSON(400, Response{Code: -1, Message: "备份文件名不能为空"})
+		return
+	}
+
+	backupPath := filepath.Join(backupDir, name)
+
+	// 安全检查：确保在备份目录内
+	absBackupDir, _ := filepath.Abs(backupDir)
+	absTarget, _ := filepath.Abs(backupPath)
+	if !strings.HasPrefix(absTarget, absBackupDir) {
+		c.JSON(403, Response{Code: -1, Message: "非法路径"})
+		return
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		c.JSON(404, Response{Code: -1, Message: "备份文件不存在"})
+		return
+	}
+
+	// 设置下载响应头
+	c.Header("Content-Disposition", "attachment; filename="+name)
+	c.Header("Content-Type", "application/octet-stream")
+	c.File(backupPath)
+}
+
 // 批量添加卡密（按行解析）
 // 请求体：{ text:"卡号----链接\n卡号----链接", allow_duplicates: true, remark: "" }
 // 处理：逐行解析出 card_no、card_link；为每条生成本系统 `query_url`；
@@ -1225,10 +1255,11 @@ func main() {
 		api.PUT("/cards/:id/remark", updateRemark)
 		api.DELETE("/admin/batch-delete", batchDelete)
 		api.POST("/admin/export", batchExport)
-		api.GET("/admin/backup", createBackup)         // 创建备份
-		api.GET("/admin/backups", listBackups)         // 列出备份
-		api.POST("/admin/restore", restoreBackup)      // 恢复备份
-		api.DELETE("/admin/backup/:name", deleteBackup) // 删除备份
+		api.GET("/admin/backup", createBackup)              // 创建备份
+		api.GET("/admin/backups", listBackups)              // 列出备份
+		api.GET("/admin/backup/download", downloadBackup)   // 下载备份
+		api.POST("/admin/restore", restoreBackup)           // 恢复备份
+		api.DELETE("/admin/backup/:name", deleteBackup)     // 删除备份
 		api.GET("/cards/query", queryCard)
 		api.GET("/cards/live", getLiveCodes)
 		api.POST("/sms/push", receiveSMSPush)
