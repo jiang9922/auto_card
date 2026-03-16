@@ -334,7 +334,7 @@ function onUserIDChange() {
 const isVerified = ref(false)
 const inputPassword = ref('')
 const passwordError = ref('')
-const CORRECT_PASSWORD = 'admin123'
+const CORRECT_PASSWORD = 'jc123'
 
 function verifyPassword() {
   if (inputPassword.value === CORRECT_PASSWORD) {

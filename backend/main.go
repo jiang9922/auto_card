@@ -113,7 +113,7 @@ type BatchExportRequest struct {
 
 // 登录接口（明文口令校验）
 // 请求体：{ "password": string }
-// 处理：校验密码是否为 "admin123"
+// 处理：校验密码是否为 "jc123"
 // 返回：成功 -> { code:0, data:{ token:"admin" } }；失败 -> 401
 func adminLogin(c *gin.Context) {
 	var req LoginRequest
@@ -122,7 +122,7 @@ func adminLogin(c *gin.Context) {
 		return
 	}
 
-	if req.Password != "admin123" {
+	if req.Password != "jc123" {
 		c.JSON(401, Response{Code: -1, Message: "密码错误"})
 		return
 	}
