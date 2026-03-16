@@ -1,10 +1,17 @@
 [build]
-builder = "DOCKERFILE"
+builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "./cards-server"
-healthcheckPath = "/health"
+healthcheckPath = "/"
 healthcheckTimeout = 100
 restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 10
+
+[[ports]]
+port = "8080"
+
+[[envs]]
+name = "PORT"
+value = "8080"
