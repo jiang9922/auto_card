@@ -260,10 +260,17 @@ const cardMatchedCode = computed(() => {
   const pureCardNo = token.split('_')[0] || ''
   
   // 在实时验证码中查找匹配的（后5位匹配即可）
-  return codes.value.find(item => {
+  const matched = codes.value.find(item => {
     const itemLast5 = item.phone.slice(-5)
     return itemLast5 === pureCardNo.slice(-5)
   })
+  
+  // 调试日志
+  if (isSpecificCardQuery.value) {
+    console.log('[cardMatchedCode] 卡号:', pureCardNo, 'codes数量:', codes.value.length, '匹配:', matched)
+  }
+  
+  return matched
 })
 
 // 从查询参数提取手机号（用于始终显示）- 完整显示
@@ -422,7 +429,7 @@ async function fetchLiveCodes(force = false) {
       const userIDs = json.data.user_ids || []
       
       // 转换数据格式
-      codes.value = data.map((item: any) => ({
+      const newCodes = data.map((item: any) => ({
         id: item.id,
         phone: item.phone,
         card_code: item.code,
@@ -431,6 +438,19 @@ async function fetchLiveCodes(force = false) {
         msg: item.msg,
         user_id: item.user_id
       }))
+      
+      // 调试日志：检查卡密查询模式下的匹配情况
+      if (isSpecificCardQuery.value && cardParam.value) {
+        const token = cardParam.value
+        const pureCardNo = token.split('_')[0] || ''
+        const matched = newCodes.find((item: any) => {
+          const itemLast5 = item.phone.slice(-5)
+          return itemLast5 === pureCardNo.slice(-5)
+        })
+        console.log('[fetchLiveCodes] 卡号:', pureCardNo, '匹配结果:', matched, '总条数:', newCodes.length)
+      }
+      
+      codes.value = newCodes
       
       // 只在 user_id 列表变化时更新
       const currentUserIDs = JSON.stringify(userIDList.value.sort())
