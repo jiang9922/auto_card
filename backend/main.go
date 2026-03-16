@@ -27,6 +27,14 @@ import (
 
 var db *sql.DB
 
+// 获取数据库路径，优先从环境变量读取
+func getDBPath() string {
+	if path := os.Getenv("DB_PATH"); path != "" {
+		return path
+	}
+	return "./cards.db"
+}
+
 // 初始化数据库连接与表结构
 // 1. 打开 SQLite 数据库文件 `cards.db`
 // 2. 如表不存在则创建 `cards` 表，字段包含：
@@ -41,7 +49,8 @@ var db *sql.DB
 //   - card_check: 是否已查询
 func init() {
 	var err error
-	db, err = sql.Open("sqlite3", "./cards.db")
+	dbPath := getDBPath()
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatal("数据库打开失败:", err)
 	}
@@ -471,10 +480,10 @@ func createBackup(c *gin.Context) {
 	db.Close()
 
 	// 复制数据库文件
-	src, err := os.Open("./cards.db")
+	src, err := os.Open(getDBPath())
 	if err != nil {
 		// 重新打开数据库
-		db, _ = sql.Open("sqlite3", "./cards.db")
+		db, _ = sql.Open("sqlite3", getDBPath())
 		c.JSON(500, Response{Code: -1, Message: "打开源数据库失败: " + err.Error()})
 		return
 	}
@@ -482,20 +491,20 @@ func createBackup(c *gin.Context) {
 
 	dst, err := os.Create(backupPath)
 	if err != nil {
-		db, _ = sql.Open("sqlite3", "./cards.db")
+		db, _ = sql.Open("sqlite3", getDBPath())
 		c.JSON(500, Response{Code: -1, Message: "创建备份文件失败: " + err.Error()})
 		return
 	}
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		db, _ = sql.Open("sqlite3", "./cards.db")
+		db, _ = sql.Open("sqlite3", getDBPath())
 		c.JSON(500, Response{Code: -1, Message: "复制数据库失败: " + err.Error()})
 		return
 	}
 
 	// 重新打开数据库连接
-	db, err = sql.Open("sqlite3", "./cards.db")
+	db, err = sql.Open("sqlite3", getDBPath())
 	if err != nil {
 		c.JSON(500, Response{Code: -1, Message: "重新打开数据库失败: " + err.Error()})
 		return
@@ -588,7 +597,7 @@ func restoreBackup(c *gin.Context) {
 	timestamp := time.Now().Format("20060102_150405")
 	currentBackup := fmt.Sprintf("./cards_before_restore_%s.db", timestamp)
 	
-	src, err := os.Open("./cards.db")
+	src, err := os.Open(getDBPath())
 	if err == nil {
 		dst, _ := os.Create(currentBackup)
 		if dst != nil {
@@ -601,28 +610,28 @@ func restoreBackup(c *gin.Context) {
 	// 恢复备份
 	src, err = os.Open(backupPath)
 	if err != nil {
-		db, _ = sql.Open("sqlite3", "./cards.db")
+		db, _ = sql.Open("sqlite3", getDBPath())
 		c.JSON(500, Response{Code: -1, Message: "打开备份文件失败: " + err.Error()})
 		return
 	}
 	defer src.Close()
 
-	dst, err := os.Create("./cards.db")
+	dst, err := os.Create(getDBPath())
 	if err != nil {
-		db, _ = sql.Open("sqlite3", "./cards.db")
+		db, _ = sql.Open("sqlite3", getDBPath())
 		c.JSON(500, Response{Code: -1, Message: "创建数据库文件失败: " + err.Error()})
 		return
 	}
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, src); err != nil {
-		db, _ = sql.Open("sqlite3", "./cards.db")
+		db, _ = sql.Open("sqlite3", getDBPath())
 		c.JSON(500, Response{Code: -1, Message: "恢复数据库失败: " + err.Error()})
 		return
 	}
 
 	// 重新打开数据库连接
-	db, err = sql.Open("sqlite3", "./cards.db")
+	db, err = sql.Open("sqlite3", getDBPath())
 	if err != nil {
 		c.JSON(500, Response{Code: -1, Message: "重新打开数据库失败: " + err.Error()})
 		return
@@ -1262,8 +1271,8 @@ func main() {
 		port = "8080"
 	}
 
-	if _, err := os.Stat("./cards.db"); os.IsNotExist(err) {
-		os.Create("./cards.db")
+	if _, err := os.Stat(getDBPath()); os.IsNotExist(err) {
+		os.Create(getDBPath())
 	}
 
 	r := gin.Default()
