@@ -1129,7 +1129,7 @@ func receiveSMSPush(c *gin.Context) {
 
 // 清理过期的短信验证码
 func cleanExpiredSMSCodes() {
-	cutoff := time.Now().Add(-2 * time.Minute)
+	cutoff := time.Now().Add(-1 * time.Minute) // 1分钟过期，与前端保持一致
 	for id, sms := range smsCodeCache {
 		if sms.CreatedAt.Before(cutoff) {
 			delete(smsCodeCache, id)
