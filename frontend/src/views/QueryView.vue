@@ -86,12 +86,12 @@
             
             <div class="notice-item">
               <h4><strong>不来码验证码</strong></h4>
-              <p>检查我提供的手机号是否输入正确，区号是否改为美国+1。上述没问题，稍后一分钟再试（可以切换网络尝试一下）。</p>
+              <p>检查我提供的手机号是否输入正确，区号是否改为香港+852。上述没问题，稍后一分钟再试（可以切换网络尝试一下）。</p>
             </div>
             
             <div class="notice-item">
               <h4><strong>手机号不存在</strong></h4>
-              <p>区号未改为美国+1。</p>
+              <p>区号未改为香港+852。</p>
             </div>
             
             <div class="notice-item">
@@ -133,7 +133,7 @@
     <!-- 实时验证码面板模式 -->
     <template v-else>
       <h2>实时验证码面板</h2>
-      <p class="subtitle">自动刷新，每条显示2分钟后自动消失</p>
+      <p class="subtitle">自动刷新，每条显示1分钟后自动消失</p>
       
       <!-- 密码验证 -->
       <div v-if="!isVerified" class="password-section">
@@ -175,7 +175,7 @@
               v-for="item in visibleCodes" 
               :key="item.id" 
               class="code-card"
-              :class="{ 'expiring': item.remainingTime < 30 }"
+              :class="{ 'expiring': item.remainingTime < 15 }"
             >
               <div class="row">
                 <span class="label">手机号</span>
@@ -205,8 +205,8 @@
               <div class="progress-bar">
                 <div 
                   class="progress" 
-                  :style="{ width: (item.remainingTime / 120 * 100) + '%' }"
-                  :class="{ 'warning': item.remainingTime < 30 }"
+                  :style="{ width: (item.remainingTime / 60 * 100) + '%' }"
+                  :class="{ 'warning': item.remainingTime < 15 }"
                 ></div>
               </div>
               
@@ -251,6 +251,7 @@ const isPolling = ref(false)
 // 定时器
 let pollTimer: any = null
 let countdownTimer: any = null
+let cleanupTimer: any = null
 
 // ===== 特定卡密查询模式 =====
 const cardMatchedCode = computed(() => {
@@ -345,13 +346,31 @@ const visibleCodes = computed(() => {
   return codes.value.map(item => {
     const createdTime = new Date(item.created_at).getTime()
     const elapsed = Math.floor((currentTime - createdTime) / 1000)
-    const remaining = Math.max(0, 120 - elapsed) // 120秒（2分钟）倒计时
+    const remaining = Math.max(0, 60 - elapsed) // 60秒（1分钟）倒计时
     return {
       ...item,
       remainingTime: remaining
     }
   })
 })
+
+// 自动清理过期验证码 - 防止内存泄漏
+function cleanupExpiredCodes() {
+  const currentTime = Date.now()
+  const beforeCount = codes.value.length
+  
+  // 清理已过期超过1分钟的数据（验证码显示时间结束后立即清理）
+  codes.value = codes.value.filter(item => {
+    const createdTime = new Date(item.created_at).getTime()
+    const elapsed = Math.floor((currentTime - createdTime) / 1000)
+    return elapsed < 60 // 60秒内保留，超过则删除
+  })
+  
+  const afterCount = codes.value.length
+  if (beforeCount !== afterCount) {
+    console.log(`清理过期验证码: ${beforeCount - afterCount} 条已删除，剩余 ${afterCount} 条`)
+  }
+}
 
 // 复制验证码
 async function copyCode(code: string) {
@@ -482,11 +501,29 @@ function formatTime(timeStr: string) {
   }
 }
 
+// 处理页面可见性变化 - 修复切换标签页卡住问题
+function handleVisibilityChange() {
+  if (document.hidden) {
+    // 页面切换到后台，暂停轮询（浏览器会自动冻结定时器）
+    console.log('页面切换到后台，暂停轮询')
+  } else {
+    // 页面切回前台，立即刷新数据并重启轮询
+    console.log('页面切回前台，恢复轮询')
+    fetchLiveCodes(true) // 强制刷新
+  }
+}
+
 onMounted(() => {
   // 所有模式都启动实时验证码轮询
   startPolling()
   // 每秒更新倒计时
   countdownTimer = setInterval(updateNow, 1000)
+  
+  // 启动自动清理过期验证码 - 每10秒清理一次，防止内存泄漏
+  cleanupTimer = setInterval(cleanupExpiredCodes, 10000)
+  
+  // 监听页面可见性变化 - 修复切换标签页卡住
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   
   // 特定卡密查询模式额外启动倒计时和验证卡号
   const cardQuery = route.query.card as string | undefined
@@ -507,6 +544,12 @@ onUnmounted(() => {
     clearInterval(cardCountdownTimer)
     cardCountdownTimer = null
   }
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer)
+    cleanupTimer = null
+  }
+  // 移除页面可见性监听
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 

@@ -7,11 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -446,6 +448,220 @@ func getSettings(c *gin.Context) {
 		Message: "success",
 		Data:    map[string]interface{}{},
 	})
+}
+
+// ==================== 数据库备份/恢复功能 ====================
+
+const backupDir = "./backups"
+
+// 创建数据库备份
+func createBackup(c *gin.Context) {
+	// 确保备份目录存在
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "创建备份目录失败: " + err.Error()})
+		return
+	}
+
+	// 生成备份文件名: cards_20060102_150405.db
+	timestamp := time.Now().Format("20060102_150405")
+	backupName := fmt.Sprintf("cards_%s.db", timestamp)
+	backupPath := filepath.Join(backupDir, backupName)
+
+	// 关闭当前数据库连接（SQLite 需要独占访问）
+	db.Close()
+
+	// 复制数据库文件
+	src, err := os.Open("./cards.db")
+	if err != nil {
+		// 重新打开数据库
+		db, _ = sql.Open("sqlite3", "./cards.db")
+		c.JSON(500, Response{Code: -1, Message: "打开源数据库失败: " + err.Error()})
+		return
+	}
+	defer src.Close()
+
+	dst, err := os.Create(backupPath)
+	if err != nil {
+		db, _ = sql.Open("sqlite3", "./cards.db")
+		c.JSON(500, Response{Code: -1, Message: "创建备份文件失败: " + err.Error()})
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		db, _ = sql.Open("sqlite3", "./cards.db")
+		c.JSON(500, Response{Code: -1, Message: "复制数据库失败: " + err.Error()})
+		return
+	}
+
+	// 重新打开数据库连接
+	db, err = sql.Open("sqlite3", "./cards.db")
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "重新打开数据库失败: " + err.Error()})
+		return
+	}
+
+	// 获取备份文件信息
+	info, _ := os.Stat(backupPath)
+	size := int64(0)
+	if info != nil {
+		size = info.Size()
+	}
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "备份成功",
+		Data: map[string]interface{}{
+			"name":      backupName,
+			"path":      backupPath,
+			"size":      size,
+			"createdAt": time.Now().Format("2006-01-02 15:04:05"),
+		},
+	})
+}
+
+// 列出所有备份
+func listBackups(c *gin.Context) {
+	// 确保备份目录存在
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "创建备份目录失败: " + err.Error()})
+		return
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "读取备份目录失败: " + err.Error()})
+		return
+	}
+
+	type BackupInfo struct {
+		Name      string `json:"name"`
+		Size      int64  `json:"size"`
+		CreatedAt string `json:"createdAt"`
+	}
+
+	backups := []BackupInfo{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		backups = append(backups, BackupInfo{
+			Name:      entry.Name(),
+			Size:      info.Size(),
+			CreatedAt: info.ModTime().Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "success",
+		Data:    backups,
+	})
+}
+
+// 恢复数据库备份
+func restoreBackup(c *gin.Context) {
+	var req struct {
+		Name string `json:"name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, Response{Code: -1, Message: "请求格式错误: 需要提供备份文件名"})
+		return
+	}
+
+	backupPath := filepath.Join(backupDir, req.Name)
+
+	// 检查备份文件是否存在
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		c.JSON(404, Response{Code: -1, Message: "备份文件不存在"})
+		return
+	}
+
+	// 关闭当前数据库连接
+	db.Close()
+
+	// 备份当前数据库（防止恢复失败丢失数据）
+	timestamp := time.Now().Format("20060102_150405")
+	currentBackup := fmt.Sprintf("./cards_before_restore_%s.db", timestamp)
+	
+	src, err := os.Open("./cards.db")
+	if err == nil {
+		dst, _ := os.Create(currentBackup)
+		if dst != nil {
+			io.Copy(dst, src)
+			dst.Close()
+		}
+		src.Close()
+	}
+
+	// 恢复备份
+	src, err = os.Open(backupPath)
+	if err != nil {
+		db, _ = sql.Open("sqlite3", "./cards.db")
+		c.JSON(500, Response{Code: -1, Message: "打开备份文件失败: " + err.Error()})
+		return
+	}
+	defer src.Close()
+
+	dst, err := os.Create("./cards.db")
+	if err != nil {
+		db, _ = sql.Open("sqlite3", "./cards.db")
+		c.JSON(500, Response{Code: -1, Message: "创建数据库文件失败: " + err.Error()})
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		db, _ = sql.Open("sqlite3", "./cards.db")
+		c.JSON(500, Response{Code: -1, Message: "恢复数据库失败: " + err.Error()})
+		return
+	}
+
+	// 重新打开数据库连接
+	db, err = sql.Open("sqlite3", "./cards.db")
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "重新打开数据库失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "恢复成功",
+		Data: map[string]interface{}{
+			"restoredFrom": req.Name,
+			"currentSaved": currentBackup,
+		},
+	})
+}
+
+// 删除备份文件
+func deleteBackup(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(400, Response{Code: -1, Message: "备份文件名不能为空"})
+		return
+	}
+
+	backupPath := filepath.Join(backupDir, name)
+
+	// 安全检查：确保在备份目录内
+	absBackupDir, _ := filepath.Abs(backupDir)
+	absTarget, _ := filepath.Abs(backupPath)
+	if !strings.HasPrefix(absTarget, absBackupDir) {
+		c.JSON(403, Response{Code: -1, Message: "非法路径"})
+		return
+	}
+
+	if err := os.Remove(backupPath); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "删除失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, Response{Code: 0, Message: "删除成功"})
 }
 
 // 批量添加卡密（按行解析）
@@ -1009,6 +1225,10 @@ func main() {
 		api.PUT("/cards/:id/remark", updateRemark)
 		api.DELETE("/admin/batch-delete", batchDelete)
 		api.POST("/admin/export", batchExport)
+		api.GET("/admin/backup", createBackup)         // 创建备份
+		api.GET("/admin/backups", listBackups)         // 列出备份
+		api.POST("/admin/restore", restoreBackup)      // 恢复备份
+		api.DELETE("/admin/backup/:name", deleteBackup) // 删除备份
 		api.GET("/cards/query", queryCard)
 		api.GET("/cards/live", getLiveCodes)
 		api.POST("/sms/push", receiveSMSPush)
