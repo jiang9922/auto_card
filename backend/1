@@ -1,0 +1,9 @@
+2026/03/17 00:58:24 服务启动: http://0.0.0.0:8085
+2026/03/17 00:58:46 Query debug - received card param: 13800138000_TIXcLU
+2026/03/17 00:58:46 Query debug - searching for query_token: 13800138000_TIXcLU
+2026/03/17 00:59:13 收到短信推送原始数据: {"msgid":"test002","tel":"13800138000","msg":"您的腾讯视频验证码是654321，请勿泄露","user_id":"test_user"}
+2026/03/17 00:59:13 收到短信推送: phone=13800138000, code=654321, from=
+2026/03/17 01:00:12 Query debug - received card param: 
+2026/03/17 01:00:13 Query debug - received card param: 
+2026/03/17 01:00:22 成功添加卡号: <script>alert(1)</script>
+2026/03/17 01:00:22 批量添加完成: 请求添加 1 条，成功添加 1 条，allow_duplicates=true

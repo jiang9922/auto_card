@@ -1,0 +1,20 @@
+# Railway 配置修复建议
+# 将此内容替换或更新 railway.toml
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "./cards-server"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# 端口配置
+[deploy.port]
+port = 8080
+
+# 数据卷挂载（在 Railway Dashboard 中配置 Volume）
+# 挂载点：/data

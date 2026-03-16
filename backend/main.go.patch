@@ -1,0 +1,79 @@
+package main
+
+// 数据库路径配置修复
+// 将此代码替换原 main.go 中的数据库初始化部分
+
+import (
+	"database/sql"
+	"log"
+	"os"
+	
+	_ "github.com/mattn/go-sqlite3"
+)
+
+var db *sql.DB
+
+// initDB 初始化数据库连接
+func initDB() (*sql.DB, error) {
+	// 从环境变量读取数据库路径，默认使用当前目录
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./cards.db"
+	}
+	
+	// 确保数据库目录存在
+	dbDir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		return nil, fmt.Errorf("创建数据库目录失败: %w", err)
+	}
+	
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("数据库打开失败: %w", err)
+	}
+	
+	return db, nil
+}
+
+// 管理员密码配置修复
+// 将此代码替换原 main.go 中的 adminLogin 函数
+
+func adminLogin(c *gin.Context) {
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, Response{Code: -1, Message: "请求格式错误"})
+		return
+	}
+	
+	// 从环境变量读取密码，默认使用硬编码（仅开发环境）
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if adminPassword == "" {
+		adminPassword = "jc123" // 仅开发环境默认值
+		log.Println("警告: 使用默认密码，生产环境请设置 ADMIN_PASSWORD 环境变量")
+	}
+	
+	if req.Password != adminPassword {
+		c.JSON(401, Response{Code: -1, Message: "密码错误"})
+		return
+	}
+	
+	c.JSON(200, Response{Code: 0, Message: "登录成功", Data: map[string]string{"token": "admin"}})
+}
+
+// 增强的 Token 验证（可选）
+func adminVerify(c *gin.Context) {
+	auth := c.GetHeader("Authorization")
+	token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+	
+	// 从环境变量读取期望的 token
+	expectedToken := os.Getenv("ADMIN_TOKEN")
+	if expectedToken == "" {
+		expectedToken = "admin" // 默认值
+	}
+	
+	if token != expectedToken {
+		c.JSON(401, Response{Code: -1, Message: "未授权"})
+		return
+	}
+	c.JSON(200, Response{Code: 0, Message: "ok"})
+}
