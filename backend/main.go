@@ -734,22 +734,50 @@ func addCard(c *gin.Context) {
 	baseURL := getBaseURL(c)
 	added := []Card{}
 
-	// 如果不允许重复，先检查哪些卡号已存在
+	// 如果不允许重复，批量检查哪些卡号已存在
 	existingCards := make(map[string]bool)
-	if !req.AllowDuplicates {
-		for _, card := range cards {
-			var count int
-			err := db.QueryRow("SELECT COUNT(*) FROM cards WHERE card_no = ?", card.CardNo).Scan(&count)
-			if err != nil {
-				log.Printf("检查重复卡号失败 %s: %v", card.CardNo, err)
-				// 查询失败时，假设卡号已存在（安全起见）
-				existingCards[card.CardNo] = true
-			} else if count > 0 {
-				existingCards[card.CardNo] = true
+	if !req.AllowDuplicates && len(cards) > 0 {
+		// 提取所有卡号
+		cardNos := make([]string, len(cards))
+		for i, card := range cards {
+			cardNos[i] = card.CardNo
+		}
+
+		// 批量查询已存在的卡号（使用 IN 子句，一次查询）
+		placeholders := make([]string, len(cardNos))
+		args := make([]interface{}, len(cardNos))
+		for i, no := range cardNos {
+			placeholders[i] = "?"
+			args[i] = no
+		}
+
+		query := "SELECT card_no FROM cards WHERE card_no IN (" + strings.Join(placeholders, ",") + ")"
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			log.Printf("批量检查重复卡号失败: %v", err)
+			// 查询失败时，假设所有卡号都可能存在（安全起见）
+			for _, no := range cardNos {
+				existingCards[no] = true
+			}
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var existingNo string
+				if err := rows.Scan(&existingNo); err == nil {
+					existingCards[existingNo] = true
+				}
 			}
 		}
 		log.Printf("不允许重复添加，发现 %d 个重复卡号", len(existingCards))
 	}
+
+	// 使用事务批量插入
+	tx, err := db.Begin()
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "开启事务失败: " + err.Error()})
+		return
+	}
+	defer tx.Rollback()
 
 	for _, card := range cards {
 		// 如果不允许重复且卡号已存在，则跳过
@@ -763,7 +791,7 @@ func addCard(c *gin.Context) {
 		queryToken := fmt.Sprintf("%s_%s", card.CardNo, randomSuffix)
 		queryURL := fmt.Sprintf("%s/query?card=%s", baseURL, url.QueryEscape(queryToken))
 
-		_, err := db.Exec(
+		_, err := tx.Exec(
 			"INSERT INTO cards (card_no, card_link, phone, remark, query_url, query_token, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
 			card.CardNo, card.CardLink, card.Phone, req.Remark, queryURL, queryToken,
 		)
@@ -773,6 +801,11 @@ func addCard(c *gin.Context) {
 		}
 		log.Printf("成功添加卡号: %s", card.CardNo)
 		added = append(added, Card{CardNo: card.CardNo, QueryURL: &queryURL})
+	}
+
+	if err := tx.Commit(); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "提交事务失败: " + err.Error()})
+		return
 	}
 
 	log.Printf("批量添加完成: 请求添加 %d 条，成功添加 %d 条，allow_duplicates=%v", len(cards), len(added), req.AllowDuplicates)
