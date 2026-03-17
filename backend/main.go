@@ -221,7 +221,7 @@ func adminVerify(c *gin.Context) {
 //   - date：按 `YYYY-MM-DD` 过滤 created_at
 //   - status：`all|checked|unchecked` 按已查状态过滤
 //
-// 处理：构造 WHERE 条件，查询总数与当前页数据
+// 处理：构造 WHERE 条件，查询总数与当前页数据（支持跨表查询）
 // 返回：{ cards:Card[], pagination:{ page,page_size,total,total_pages } }
 func getAllCards(c *gin.Context) {
 	// 获取分页参数
@@ -248,6 +248,9 @@ func getAllCards(c *gin.Context) {
 	statusFilter := c.Query("status")   // 状态筛选 (all/checked/unchecked)
 	phoneFilter := c.Query("phone")     // 手机号筛选
 	cardNoFilter := c.Query("card_no")  // 卡号搜索
+
+	// 获取需要查询的所有表（主表+分表）
+	tables := getQueryTables()
 
 	// 构建查询条件
 	whereClause := ""
@@ -285,25 +288,40 @@ func getAllCards(c *gin.Context) {
 		whereClause = "WHERE 1=1"
 	}
 
+	// 查询所有表的总数
+	total := 0
+	for _, table := range tables {
+		var count int
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", table, whereClause)
+		err := db.QueryRow(countQuery, args...).Scan(&count)
+		if err != nil {
+			log.Printf("查询表 %s 总数失败: %v", table, err)
+			continue
+		}
+		total += count
+	}
+
 	// 计算偏移量
 	offset := (page - 1) * pageSize
 
-	// 查询总数
-	var total int
-	countQuery := "SELECT COUNT(*) FROM cards " + whereClause
-	err := db.QueryRow(countQuery, args...).Scan(&total)
-	if err != nil {
-		c.JSON(500, Response{Code: -1, Message: "查询总数失败"})
-		return
+	// 构建 UNION ALL 查询
+	var unionQueries []string
+	for _, table := range tables {
+		query := fmt.Sprintf(
+			"SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check FROM %s %s",
+			table, whereClause,
+		)
+		unionQueries = append(unionQueries, query)
 	}
 
-	// 查询当前页数据
-	query := "SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check FROM cards " +
-		whereClause + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	// 合并查询并排序、分页
+	unionSQL := strings.Join(unionQueries, " UNION ALL ")
+	finalQuery := unionSQL + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
 	dataArgs := append(args, pageSize, offset)
-	rows, err := db.Query(query, dataArgs...)
+
+	rows, err := db.Query(finalQuery, dataArgs...)
 	if err != nil {
-		c.JSON(500, Response{Code: -1, Message: "查询失败"})
+		c.JSON(500, Response{Code: -1, Message: "查询失败: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -990,17 +1008,12 @@ func batchExport(c *gin.Context) {
 	c.String(200, content)
 }
 
-// 查询验证码并回写结果
+// 查询验证码并回写结果（异步模式）
 // 输入：`GET /api/cards/query?card=卡号`
 // 处理：
-//  1. 读取本地库中的 `card_link` 远程接口地址
-//  2. 请求远程接口，解析 JSON 响应
-//  3. 若返回包含验证码与过期时间：
-//     - 提取纯数字验证码
-//     - 标准化过期时间为 RFC3339（UTC）
-//     - 更新本地库：`card_code`、`card_expired_date`、`card_note`、`card_check=1`
-//     - 返回 { code:0, data:{ card_no, card_code, card_expired_date, card_note } }
-//  4. 否则仅保存原始响应到 `card_note` 并标记已查，返回业务失败信息
+//  1. 立即返回当前状态，不等待远程查询完成
+//  2. 异步触发远程查询（如果该卡号近期未查询过）
+//  3. 前端可通过 /api/cards/status?card=卡号 轮询查询结果
 func queryCard(c *gin.Context) {
 	cardNo := c.Query("card")
 	log.Printf("Query debug - received card param: %s", cardNo)
@@ -1020,57 +1033,198 @@ func queryCard(c *gin.Context) {
 		cardLink = linkPlain
 	}
 	if cardLink == "" {
-		// 使用 query_token 字段精确匹配查询参数
+		// 使用 query_token 字段精确匹配查询参数（跨表查询）
 		log.Printf("Query debug - searching for query_token: %s", cardNo)
-		err := db.QueryRow("SELECT card_link FROM cards WHERE query_token = ?", cardNo).Scan(&cardLink)
-		if err != nil {
-			log.Printf("Query debug - query_token not found: %v", err)
+		
+		// 在所有表中查询
+		tables := getQueryTables()
+		for _, table := range tables {
+			err := db.QueryRow(fmt.Sprintf("SELECT card_link FROM %s WHERE query_token = ?", table), cardNo).Scan(&cardLink)
+			if err == nil {
+				break
+			}
+		}
+		
+		if cardLink == "" {
+			log.Printf("Query debug - query_token not found: %s", cardNo)
 			c.JSON(404, Response{Code: -1, Message: "卡号不存在"})
 			return
 		}
 	}
 
+	// 获取或创建查询任务
+	task := getOrCreateQueryTask(cardNo)
+
+	// 如果任务不是正在查询中，异步触发远程查询
+	if task.Status != "querying" {
+		task.Status = "querying"
+		task.UpdatedAt = time.Now()
+		go func(cardNo, cardLink string) {
+			queryRemoteCardAsync(cardNo, cardLink)
+		}(cardNo, cardLink)
+	}
+
+	// 立即返回当前状态，不等待
+	// 尝试获取当前数据库中的数据
+	var card Card
+	var queryURL, queryToken, code, expired, note, phone, remark sql.NullString
+	err := db.QueryRow(`
+		SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
+		FROM cards WHERE query_token = ? OR card_no = ?`, cardNo, cardNo).Scan(
+		&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expired, &note, &card.CardCheck)
+	
+	if err != nil {
+		log.Printf("查询本地卡密失败: %v", err)
+	}
+	
+	if queryURL.Valid {
+		card.QueryURL = &queryURL.String
+	}
+	if queryToken.Valid {
+		card.QueryToken = &queryToken.String
+	}
+	if phone.Valid {
+		card.Phone = &phone.String
+	}
+	if remark.Valid {
+		card.Remark = &remark.String
+	}
+	if code.Valid {
+		card.CardCode = &code.String
+	}
+	if expired.Valid {
+		card.CardExpiredDate = &expired.String
+	}
+	if note.Valid {
+		card.CardNote = &note.String
+	}
+
+	c.JSON(200, Response{
+		Code:    0, 
+		Message: "查询已触发",
+		Data: map[string]interface{}{
+			"card":       card,
+			"task_status": task.Status,
+		},
+	})
+}
+
+// 异步查询远程卡密信息
+func queryRemoteCardAsync(cardNo, cardLink string) {
 	resp, err := httpClient.Get(cardLink)
 	if err != nil {
-		c.JSON(500, Response{Code: -1, Message: "远程接口错误"})
+		log.Printf("远程接口错误: %v", err)
+		updateQueryTask(cardNo, "failed", nil, "远程接口错误")
 		return
 	}
 	defer resp.Body.Close()
 
 	var remoteResp RemoteResponse
 	if err := json.NewDecoder(resp.Body).Decode(&remoteResp); err != nil {
-		c.JSON(500, Response{Code: -1, Message: "解析响应失败"})
+		log.Printf("解析响应失败: %v", err)
+		updateQueryTask(cardNo, "failed", nil, "解析响应失败")
 		return
 	}
 
 	rawNote, _ := json.Marshal(remoteResp)
 	note := string(rawNote)
-	// 校验验证码与过期时间 返回code==1
+
+	// 校验验证码与过期时间
 	if remoteResp.Code == 1 && remoteResp.Data.Code != "" {
 		code := extractVerificationCode(remoteResp.Data.Code)
 		expired := convertTimeFormat(remoteResp.Data.ExpiredDate)
-		// 使用 query_token 或纯卡号更新数据库
-		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", code, expired, note, cardNo, cardNo)
+		
+		// 更新数据库
+		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
+			code, expired, note, cardNo, cardNo)
 		if err != nil {
 			log.Printf("更新数据库失败: %v", err)
 		}
-		// 提取纯卡号用于返回
-		pureCardNo := cardNo
-		if idx := strings.Index(cardNo, "_"); idx > 0 {
-			pureCardNo = cardNo[:idx]
-		}
-		c.JSON(200, Response{Code: 0, Message: "success", Data: map[string]interface{}{
-			"card_no": pureCardNo, "card_code": code, "card_expired_date": expired, "card_note": note,
-		}})
+		
+		// 更新任务状态
+		updateQueryTask(cardNo, "completed", &CardInfo{
+			CardNo:          cardNo,
+			CardCode:        code,
+			CardExpiredDate: expired,
+			CardNote:        note,
+		}, "")
+		
+		log.Printf("异步查询完成: card=%s, code=%s", cardNo, code)
 	} else {
-		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", note, cardNo, cardNo)
+		// 只标记已查，不更新验证码
+		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
+			note, cardNo, cardNo)
 		if err != nil {
 			log.Printf("标记已查失败: %v", err)
 		}
-		//c.JSON(200, Response{Code: -1, Message: "暂未获取验证码", Data: map[string]interface{}{"raw_response": note}})
-		c.JSON(200, Response{Code: -1, Message: "暂未获取验证码，请在腾讯视频中点击获取，或者稍后重试。", Data: map[string]interface{}{"raw_response": note}})
-
+		
+		updateQueryTask(cardNo, "completed", nil, "暂未获取验证码")
+		log.Printf("异步查询完成（无验证码）: card=%s", cardNo)
 	}
+}
+
+// 获取查询任务状态
+// 输入：`GET /api/cards/status?card=卡号`
+// 返回：查询任务的当前状态和结果
+func getCardQueryStatus(c *gin.Context) {
+	cardNo := c.Query("card")
+	if cardNo == "" {
+		c.JSON(400, Response{Code: -1, Message: "缺少 card 参数"})
+		return
+	}
+
+	queryTasksMutex.RLock()
+	task, exists := queryTasks[cardNo]
+	queryTasksMutex.RUnlock()
+
+	if !exists {
+		c.JSON(404, Response{Code: -1, Message: "未找到查询任务"})
+		return
+	}
+
+	// 同时返回数据库中的最新数据
+	var card Card
+	var queryURL, queryToken, code, expired, note, phone, remark sql.NullString
+	err := db.QueryRow(`
+		SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
+		FROM cards WHERE query_token = ? OR card_no = ?`, cardNo, cardNo).Scan(
+		&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expired, &note, &card.CardCheck)
+	
+	if err != nil {
+		log.Printf("查询本地卡密失败: %v", err)
+	} else {
+		if queryURL.Valid {
+			card.QueryURL = &queryURL.String
+		}
+		if queryToken.Valid {
+			card.QueryToken = &queryToken.String
+		}
+		if phone.Valid {
+			card.Phone = &phone.String
+		}
+		if remark.Valid {
+			card.Remark = &remark.String
+		}
+		if code.Valid {
+			card.CardCode = &code.String
+		}
+		if expired.Valid {
+			card.CardExpiredDate = &expired.String
+		}
+		if note.Valid {
+			card.CardNote = &note.String
+		}
+	}
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "success",
+		Data: map[string]interface{}{
+			"task_status": task.Status,
+			"task_error":  task.Error,
+			"card":        card,
+		},
+	})
 }
 
 // ==================== 工具函数 ====================
@@ -1382,10 +1536,22 @@ func main() {
 		api.POST("/admin/restore", restoreBackup)           // 恢复备份
 		api.DELETE("/admin/backup/:name", deleteBackup)     // 删除备份
 		api.GET("/cards/query", queryCard)
+		api.GET("/cards/status", getCardQueryStatus)        // 查询任务状态
 		api.GET("/cards/live", getLiveCodes)
 		api.POST("/sms/push", receiveSMSPush)
 		api.GET("/sms/live", getLiveSMSCodes)
 	}
+
+	// 启动定时清理过期查询任务
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			<-ticker.C
+			cleanupExpiredQueryTasks()
+			log.Println("清理过期查询任务完成")
+		}
+	}()
 
 	// 健康检查接口 - 根路径，用于 Railway 健康检查
 	r.GET("/health", func(c *gin.Context) {
