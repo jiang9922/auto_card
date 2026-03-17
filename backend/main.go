@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"math/big"
@@ -138,7 +139,42 @@ type BatchExportRequest struct {
 	IDs []int `json:"ids" binding:"required"`
 }
 
-// ==================== API 接口 ====================
+// ==================== XSS 防护工具函数 ====================
+
+// escapeCard 对 Card 结构体中的字符串字段进行 HTML 转义，防止 XSS
+func escapeCard(card Card) Card {
+	card.CardNo = html.EscapeString(card.CardNo)
+	card.CardLink = html.EscapeString(card.CardLink)
+	if card.Phone != nil {
+		escaped := html.EscapeString(*card.Phone)
+		card.Phone = &escaped
+	}
+	if card.Remark != nil {
+		escaped := html.EscapeString(*card.Remark)
+		card.Remark = &escaped
+	}
+	if card.QueryURL != nil {
+		escaped := html.EscapeString(*card.QueryURL)
+		card.QueryURL = &escaped
+	}
+	if card.QueryToken != nil {
+		escaped := html.EscapeString(*card.QueryToken)
+		card.QueryToken = &escaped
+	}
+	if card.CardCode != nil {
+		escaped := html.EscapeString(*card.CardCode)
+		card.CardCode = &escaped
+	}
+	if card.CardExpiredDate != nil {
+		escaped := html.EscapeString(*card.CardExpiredDate)
+		card.CardExpiredDate = &escaped
+	}
+	if card.CardNote != nil {
+		escaped := html.EscapeString(*card.CardNote)
+		card.CardNote = &escaped
+	}
+	return card
+}
 
 // 登录接口（明文口令校验）
 // 请求体：{ "password": string }
@@ -302,7 +338,8 @@ func getAllCards(c *gin.Context) {
 		if note.Valid {
 			card.CardNote = &note.String
 		}
-		cards = append(cards, card)
+		// XSS 防护：对返回数据进行 HTML 转义
+		cards = append(cards, escapeCard(card))
 	}
 
 	// 返回分页数据
@@ -369,7 +406,8 @@ func getLiveCodes(c *gin.Context) {
 			maskedPhone := maskPhone(phone.String)
 			card.Phone = &maskedPhone
 		}
-		cards = append(cards, card)
+		// XSS 防护：对返回数据进行 HTML 转义
+		cards = append(cards, escapeCard(card))
 	}
 
 	c.JSON(200, Response{
@@ -379,16 +417,19 @@ func getLiveCodes(c *gin.Context) {
 	})
 }
 
-// 自动查询所有卡密（同步版本）
-func autoQueryPendingCardsSync() {
-	// 查询所有卡密（最多50条，同步查询）
+// 自动查询所有卡密（异步版本，带并发控制）
+func autoQueryPendingCardsAsync() {
+	// 使用带缓冲的 channel 限制并发数（最多10个并发请求）
+	semaphore := make(chan struct{}, 10)
+	var wg sync.WaitGroup
+
+	// 查询所有卡密（去掉50条限制，支持大量卡密）
 	rows, err := db.Query(`
 		SELECT card_no, card_link, query_token
 		FROM cards
 		WHERE card_link IS NOT NULL
 		AND card_link != ''
-		ORDER BY created_at DESC
-		LIMIT 50`)
+		ORDER BY created_at DESC`)
 	if err != nil {
 		log.Printf("自动查询失败: %v", err)
 		return
@@ -407,9 +448,19 @@ func autoQueryPendingCardsSync() {
 			token = cardNo
 		}
 
-		// 同步查询，确保获取到结果
-		queryRemoteCard(cardLink, token)
+		// 异步查询，使用信号量控制并发
+		wg.Add(1)
+		go func(link, t string) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // 获取信号量
+			defer func() { <-semaphore }() // 释放信号量
+			queryRemoteCard(link, t)
+		}(cardLink, token)
 	}
+
+	// 等待所有查询完成
+	wg.Wait()
+	log.Println("异步自动查询完成")
 }
 
 // 查询远程卡密信息（内部使用）
@@ -826,7 +877,7 @@ func addCard(c *gin.Context) {
 		queryToken := fmt.Sprintf("%s_%s", card.CardNo, randomSuffix)
 		queryURL := fmt.Sprintf("%s/query?card=%s", baseURL, url.QueryEscape(queryToken))
 
-		_, err := tx.Exec(
+		result, err := tx.Exec(
 			"INSERT INTO cards (card_no, card_link, phone, remark, query_url, query_token, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
 			card.CardNo, card.CardLink, card.Phone, req.Remark, queryURL, queryToken,
 		)
@@ -834,8 +885,10 @@ func addCard(c *gin.Context) {
 			log.Printf("添加失败 %s: %v", card.CardNo, err)
 			continue
 		}
-		log.Printf("成功添加卡号: %s", card.CardNo)
-		added = append(added, Card{CardNo: card.CardNo, QueryURL: &queryURL})
+		// 获取插入的 ID
+		lastID, _ := result.LastInsertId()
+		log.Printf("成功添加卡号: %s, ID: %d", card.CardNo, lastID)
+		added = append(added, Card{ID: int(lastID), CardNo: card.CardNo, QueryURL: &queryURL})
 	}
 
 	if err := tx.Commit(); err != nil {
