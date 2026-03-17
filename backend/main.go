@@ -33,6 +33,75 @@ var httpClient = &http.Client{
 	Timeout: 30 * time.Second,
 }
 
+// ==================== 查询任务管理（方案3：按需查询） ====================
+
+// CardInfo 存储查询结果
+type CardInfo struct {
+	CardNo          string `json:"card_no"`
+	CardCode        string `json:"card_code"`
+	CardExpiredDate string `json:"card_expired_date"`
+	CardNote        string `json:"card_note"`
+}
+
+// QueryTask 查询任务状态
+type QueryTask struct {
+	CardNo     string     `json:"card_no"`
+	Status     string     `json:"status"` // querying, completed, failed
+	Result     *CardInfo  `json:"result,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+// 查询任务缓存（内存存储）
+var queryTasks = make(map[string]*QueryTask)
+var queryTasksMutex sync.RWMutex
+
+// 获取或创建查询任务
+func getOrCreateQueryTask(cardNo string) *QueryTask {
+	queryTasksMutex.Lock()
+	defer queryTasksMutex.Unlock()
+	
+	task, exists := queryTasks[cardNo]
+	if !exists || time.Since(task.UpdatedAt) > 5*time.Minute {
+		// 任务不存在或已过期（5分钟），创建新任务
+		task = &QueryTask{
+			CardNo:    cardNo,
+			Status:    "pending",
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		queryTasks[cardNo] = task
+	}
+	return task
+}
+
+// 更新查询任务状态
+func updateQueryTask(cardNo string, status string, result *CardInfo, errMsg string) {
+	queryTasksMutex.Lock()
+	defer queryTasksMutex.Unlock()
+	
+	if task, exists := queryTasks[cardNo]; exists {
+		task.Status = status
+		task.Result = result
+		task.Error = errMsg
+		task.UpdatedAt = time.Now()
+	}
+}
+
+// 清理过期的查询任务（超过30分钟）
+func cleanupExpiredQueryTasks() {
+	queryTasksMutex.Lock()
+	defer queryTasksMutex.Unlock()
+	
+	cutoff := time.Now().Add(-30 * time.Minute)
+	for cardNo, task := range queryTasks {
+		if task.UpdatedAt.Before(cutoff) {
+			delete(queryTasks, cardNo)
+		}
+	}
+}
+
 // 获取数据库路径，优先从环境变量读取
 func getDBPath() string {
 	if path := os.Getenv("DB_PATH"); path != "" {
@@ -95,6 +164,201 @@ func init() {
 	} else {
 		log.Println("数据库索引创建成功")
 	}
+
+	// 初始化分表
+	initPartitionTables()
+
+	// 启动归档任务（每天凌晨3点执行）
+	go startArchiveTask()
+}
+
+// ==================== 分表管理 ====================
+
+// 获取当前月表名
+func getCurrentMonthTable() string {
+	now := time.Now()
+	return fmt.Sprintf("cards_%04d%02d", now.Year(), now.Month())
+}
+
+// 获取指定月份的表名
+func getMonthTable(t time.Time) string {
+	return fmt.Sprintf("cards_%04d%02d", t.Year(), t.Month())
+}
+
+// 初始化分表（创建当月表）
+func initPartitionTables() {
+	currentTable := getCurrentMonthTable()
+	createPartitionTable(currentTable)
+	log.Printf("当前月表: %s", currentTable)
+}
+
+// 创建分表（与主表结构一致）
+func createPartitionTable(tableName string) error {
+	createSQL := fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		card_no TEXT NOT NULL,
+		card_link TEXT NOT NULL,
+		phone TEXT,
+		remark TEXT,
+		query_url TEXT,
+		query_token TEXT UNIQUE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		card_code TEXT,
+		card_expired_date TEXT,
+		card_note TEXT,
+		card_check BOOLEAN DEFAULT FALSE
+	);`, tableName)
+	
+	_, err := db.Exec(createSQL)
+	if err != nil {
+		log.Printf("创建分表 %s 失败: %v", tableName, err)
+		return err
+	}
+	
+	// 为分表创建索引
+	indexSQL := fmt.Sprintf(`
+	CREATE INDEX IF NOT EXISTS idx_%s_card_no ON %s(card_no);
+	CREATE INDEX IF NOT EXISTS idx_%s_query_token ON %s(query_token);
+	CREATE INDEX IF NOT EXISTS idx_%s_created_at ON %s(created_at);
+	`, tableName, tableName, tableName, tableName, tableName, tableName)
+	
+	_, err = db.Exec(indexSQL)
+	if err != nil {
+		log.Printf("创建分表 %s 索引失败: %v", tableName, err)
+	}
+	
+	return nil
+}
+
+// 归档任务：将3个月前的数据移到冷表
+func archiveOldData() {
+	log.Println("开始归档任务...")
+	
+	// 计算3个月前的日期
+	threeMonthsAgo := time.Now().AddDate(0, -3, 0)
+	cutoffDate := threeMonthsAgo.Format("2006-01-01")
+	
+	// 查询需要归档的数据
+	rows, err := db.Query("SELECT * FROM cards WHERE DATE(created_at) < ? LIMIT 1000", cutoffDate)
+	if err != nil {
+		log.Printf("查询归档数据失败: %v", err)
+		return
+	}
+	defer rows.Close()
+	
+	// 按月份分组数据
+	monthData := make(map[string][]map[string]interface{})
+	
+	for rows.Next() {
+		var card Card
+		var cardCheck int
+		err := rows.Scan(
+			&card.ID, &card.CardNo, &card.CardLink, &card.Phone, &card.Remark,
+			&card.QueryURL, &card.QueryToken, &card.CreatedAt, &card.CardCode,
+			&card.CardExpiredDate, &card.CardNote, &cardCheck,
+		)
+		if err != nil {
+			log.Printf("扫描归档数据失败: %v", err)
+			continue
+		}
+		
+		// 解析创建时间，确定目标表
+		createdTime, _ := time.Parse("2006-01-02 15:04:05", card.CreatedAt)
+		targetTable := getMonthTable(createdTime)
+		
+		if monthData[targetTable] == nil {
+			monthData[targetTable] = []map[string]interface{}{}
+		}
+		
+		monthData[targetTable] = append(monthData[targetTable], map[string]interface{}{
+			"card_no":             card.CardNo,
+			"card_link":           card.CardLink,
+			"phone":               card.Phone,
+			"remark":              card.Remark,
+			"query_url":           card.QueryURL,
+			"query_token":         card.QueryToken,
+			"created_at":          card.CreatedAt,
+			"card_code":           card.CardCode,
+			"card_expired_date":   card.CardExpiredDate,
+			"card_note":           card.CardNote,
+			"card_check":          cardCheck,
+		})
+	}
+	
+	// 按月份插入到冷表并删除原数据
+	totalArchived := 0
+	for tableName, records := range monthData {
+		// 确保冷表存在
+		createPartitionTable(tableName)
+		
+		// 插入数据
+		for _, record := range records {
+			_, err := db.Exec(fmt.Sprintf(`
+				INSERT OR IGNORE INTO %s (card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, tableName),
+				record["card_no"], record["card_link"], record["phone"], record["remark"],
+				record["query_url"], record["query_token"], record["created_at"],
+				record["card_code"], record["card_expired_date"], record["card_note"], record["card_check"],
+			)
+			if err != nil {
+				log.Printf("插入冷表失败: %v", err)
+				continue
+			}
+			totalArchived++
+		}
+	}
+	
+	// 删除已归档的数据
+	if totalArchived > 0 {
+		_, err := db.Exec("DELETE FROM cards WHERE DATE(created_at) < ?", cutoffDate)
+		if err != nil {
+			log.Printf("删除已归档数据失败: %v", err)
+		} else {
+			log.Printf("归档完成: %d 条数据已归档", totalArchived)
+		}
+	} else {
+		log.Println("没有需要归档的数据")
+	}
+}
+
+// 启动归档定时任务
+func startArchiveTask() {
+	// 立即执行一次
+	archiveOldData()
+	
+	// 每天凌晨3点执行
+	for {
+		now := time.Now()
+		nextRun := time.Date(now.Year(), now.Month(), now.Day()+1, 3, 0, 0, 0, now.Location())
+		sleepDuration := nextRun.Sub(now)
+		
+		log.Printf("下次归档任务时间: %s", nextRun.Format("2006-01-02 15:04:05"))
+		time.Sleep(sleepDuration)
+		
+		archiveOldData()
+	}
+}
+
+// 获取所有需要查询的表（主表+近3个月的分表）
+func getQueryTables() []string {
+	tables := []string{"cards"} // 主表（当前月数据）
+	
+	// 添加近3个月的分表
+	for i := 0; i < 3; i++ {
+		t := time.Now().AddDate(0, -i, 0)
+		tableName := getMonthTable(t)
+		
+		// 检查表是否存在
+		var count int
+		err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", tableName).Scan(&count)
+		if err == nil && count > 0 {
+			tables = append(tables, tableName)
+		}
+	}
+	
+	return tables
 }
 
 // ==================== 响应结构体 ====================

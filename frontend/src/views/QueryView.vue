@@ -323,7 +323,7 @@ async function verifyCard(token: string) {
       updateCardDisplay(currentCardData.value)
     }
     
-    // 步骤2: 开始轮询查询状态（每2秒一次，最多30次 = 60秒）
+    // 步骤2: 开始轮询查询状态（每1秒一次，最多60次 = 60秒）
     startQueryStatusPolling(token)
     
   } catch (err) {
@@ -334,7 +334,7 @@ async function verifyCard(token: string) {
 
 // 轮询查询状态
 let pollCount = 0
-const MAX_POLL_COUNT = 30
+const MAX_POLL_COUNT = 60
 
 function startQueryStatusPolling(token: string) {
   pollCount = 0
@@ -379,7 +379,7 @@ function startQueryStatusPolling(token: string) {
     } catch (err) {
       console.error('轮询查询状态失败:', err)
     }
-  }, 2000) // 每2秒轮询一次
+  }, 1000) // 每1秒轮询一次
 }
 
 // 更新卡密显示
