@@ -205,6 +205,8 @@ async function importCSV() {
       if (csvFileInput.value) {
         csvFileInput.value.value = ''
       }
+      // 导入成功后刷新页面，显示新数据
+      setTimeout(() => window.location.reload(), 1500)
     } else {
       toast(json.message || '导入失败', 'error')
     }
