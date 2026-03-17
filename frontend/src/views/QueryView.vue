@@ -287,13 +287,13 @@ const cardLoading = ref(false)
 const cardVerified = ref(false)
 const cardError = ref('')
 
-// 查询状态轮询
+// 查询状态轮询（保留以备异步模式使用）
 let queryStatusTimer: any = null
 const queryStatus = ref<'pending' | 'querying' | 'completed' | 'failed'>('pending')
 const queryError = ref('')
 const currentCardData = ref<any>(null)
 
-// 验证卡号并触发异步查询（按需查询模式）
+// 验证卡号并触发查询（按需查询模式 - 默认同步模式）
 async function verifyCard(token: string) {
   cardLoading.value = true
   cardError.value = ''
@@ -302,8 +302,8 @@ async function verifyCard(token: string) {
   queryError.value = ''
   
   try {
-    // 步骤1: 触发异步查询
-    const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}`)
+    // 同步模式：直接获取查询结果
+    const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}&sync=1`)
     const json = await res.json()
     
     if (json.code !== 0) {
@@ -313,18 +313,13 @@ async function verifyCard(token: string) {
       return
     }
     
-    // 卡号存在，开始轮询查询状态
+    // 查询成功，直接显示结果
     cardVerified.value = true
-    queryStatus.value = json.data?.task_status || 'querying'
-    currentCardData.value = json.data?.card || null
+    cardLoading.value = false
     
-    // 如果已有验证码，立即显示
-    if (currentCardData.value?.card_code) {
-      updateCardDisplay(currentCardData.value)
+    if (json.data) {
+      updateCardDisplay(json.data)
     }
-    
-    // 步骤2: 开始轮询查询状态（每1秒一次，最多60次 = 60秒）
-    startQueryStatusPolling(token)
     
   } catch (err) {
     cardError.value = '验证失败'
