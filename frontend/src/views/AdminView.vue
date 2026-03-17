@@ -20,14 +20,8 @@
         <div class="modal-body">
           <!-- 操作按钮 -->
           <div class="backup-actions">
-            <button @click="createBackup" :disabled="loading" class="btn-primary">
-              {{ loading ? '创建中...' : '📥 创建新备份' }}
-            </button>
             <button @click="exportFullCSV" :disabled="loading" class="btn-success">
               {{ loading ? '导出中...' : '📄 导出完整数据(CSV)' }}
-            </button>
-            <button @click="loadBackups" :disabled="loading" class="btn-secondary">
-              🔄 刷新列表
             </button>
           </div>
           
@@ -65,33 +59,12 @@
             </div>
           </div>
           
-          <!-- 备份列表 -->
-          <div class="backup-list">
-            <div v-if="backups.length === 0" class="empty">
-              {{ loading ? '加载中...' : '暂无备份文件' }}
-            </div>
-            <div v-for="backup in backups" :key="backup.name" class="backup-item">
-              <div class="backup-info">
-                <span class="backup-name">{{ backup.name }}</span>
-                <span class="backup-meta">
-                  {{ formatSize(backup.size) }} · {{ backup.createdAt }}
-                </span>
-              </div>
-              <div class="backup-actions">
-                <button @click="downloadBackup(backup.name)" class="btn-icon" title="下载">⬇️</button>
-                <button @click="restoreBackup(backup.name)" class="btn-icon" title="恢复">↩️</button>
-                <button @click="deleteBackup(backup.name)" class="btn-icon btn-danger" title="删除">🗑️</button>
-              </div>
-            </div>
-          </div>
-          
           <!-- 提示信息 -->
           <div class="backup-tips">
             <p>💡 提示：</p>
             <ul>
-              <li>备份文件包含所有卡密数据，请妥善保管</li>
-              <li>恢复备份会覆盖当前数据，操作前会自动备份当前状态</li>
-              <li>建议定期创建备份，防止数据丢失</li>
+              <li>导出 CSV 可保存到本地电脑，用 Excel 查看和编辑</li>
+              <li>导入 CSV 可批量恢复数据，已存在的查询链接会自动跳过</li>
             </ul>
           </div>
         </div>
@@ -125,13 +98,6 @@ const toast = useToast()
 // 备份管理
 const showBackupModal = ref(false)
 const loading = ref(false)
-const backups = ref<any[]>([])
-
-interface Backup {
-  name: string
-  size: number
-  createdAt: string
-}
 
 interface ConfirmModal {
   show: boolean
@@ -155,140 +121,6 @@ const selectedFile: Ref<File | null> = ref(null)
 // 获取 API 基础地址
 function getBaseURL() {
   return import.meta.env.VITE_API_BASE_URL || ''
-}
-
-// 加载备份列表
-async function loadBackups() {
-  loading.value = true
-  try {
-    const res = await fetch(`${getBaseURL()}/api/admin/backups`)
-    const json = await res.json()
-    if (json.code === 0) {
-      backups.value = json.data || []
-    } else {
-      toast(json.message || '加载失败', 'error')
-    }
-  } catch (err) {
-    toast('加载备份列表失败', 'error')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 创建备份
-async function createBackup() {
-  loading.value = true
-  try {
-    const res = await fetch(`${getBaseURL()}/api/admin/backup`, { method: 'POST' })
-    const json = await res.json()
-    if (json.code === 0) {
-      toast('备份创建成功', 'success')
-      loadBackups()
-    } else {
-      toast(json.message || '创建失败', 'error')
-    }
-  } catch (err) {
-    toast('创建备份失败', 'error')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 下载备份
-async function downloadBackup(name: string) {
-  try {
-    const res = await fetch(`${getBaseURL()}/api/admin/backup/download?name=${encodeURIComponent(name)}`)
-    if (!res.ok) {
-      // 如果下载接口不存在，使用备用方案：直接通过后端文件路径下载
-      const link = document.createElement('a')
-      link.href = `${getBaseURL()}/backups/${name}`
-      link.download = name
-      link.click()
-      return
-    }
-    
-    const blob = await res.blob()
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = name
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-    toast('下载已开始', 'success')
-  } catch (err) {
-    toast('下载失败', 'error')
-  }
-}
-
-// 恢复备份
-function restoreBackup(name: string) {
-  confirmModal.value = {
-    show: true,
-    title: '确认恢复备份',
-    message: `确定要恢复备份 "${name}" 吗？\n当前数据会被自动备份，可后续手动恢复。`,
-    onConfirm: async () => {
-      confirmModal.value.show = false
-      loading.value = true
-      try {
-        const res = await fetch(`${getBaseURL()}/api/admin/restore`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name })
-        })
-        const json = await res.json()
-        if (json.code === 0) {
-          toast('恢复成功，页面即将刷新', 'success')
-          setTimeout(() => window.location.reload(), 1500)
-        } else {
-          toast(json.message || '恢复失败', 'error')
-        }
-      } catch (err) {
-        toast('恢复备份失败', 'error')
-      } finally {
-        loading.value = false
-      }
-    }
-  }
-}
-
-// 删除备份
-function deleteBackup(name: string) {
-  confirmModal.value = {
-    show: true,
-    title: '确认删除备份',
-    message: `确定要删除备份 "${name}" 吗？\n此操作不可恢复。`,
-    onConfirm: async () => {
-      confirmModal.value.show = false
-      loading.value = true
-      try {
-        const res = await fetch(`${getBaseURL()}/api/admin/backup/${encodeURIComponent(name)}`, {
-          method: 'DELETE'
-        })
-        const json = await res.json()
-        if (json.code === 0) {
-          toast('删除成功', 'success')
-          loadBackups()
-        } else {
-          toast(json.message || '删除失败', 'error')
-        }
-      } catch (err) {
-        toast('删除备份失败', 'error')
-      } finally {
-        loading.value = false
-      }
-    }
-  }
-}
-
-// 格式化文件大小
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 // 导出完整 CSV
@@ -389,11 +221,6 @@ onMounted(() => {
   if (!token) {
     router.replace('/login')
   }
-})
-
-// 打开备份弹窗时加载列表
-watch(showBackupModal, (val) => {
-  if (val) loadBackups()
 })
 
 function logout() {
