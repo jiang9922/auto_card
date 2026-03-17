@@ -362,10 +362,10 @@ func getAllCards(c *gin.Context) {
 // 查询参数：
 //   - limit：返回条数，默认 20
 // 返回：最近获取的验证码列表
-// 自动查询未获取验证码的卡密（异步执行，不阻塞响应）
+// 【方案3：按需查询】后台不做全量自动刷新，只在用户查询单个卡密时实时获取数据
 func getLiveCodes(c *gin.Context) {
-	// 异步触发自动查询，不阻塞当前请求
-	go autoQueryPendingCardsAsync()
+	// 方案3：按需查询模式，不再自动全量刷新所有卡密
+	// 用户查询单个卡密时，/api/cards/query 接口会实时获取最新数据
 
 	limitStr := c.Query("limit")
 	limit := 20
