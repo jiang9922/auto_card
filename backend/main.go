@@ -442,28 +442,45 @@ func autoQueryPendingCardsAsync() {
 	var wg sync.WaitGroup
 
 	// 查询所有卡密（去掉50条限制，支持大量卡密）
-	rows, err := db.Query(`
-		SELECT card_no, card_link, query_token
-		FROM cards
-		WHERE card_link IS NOT NULL
-		AND card_link != ''
-		ORDER BY created_at DESC`)
-	if err != nil {
-		log.Printf("自动查询失败: %v", err)
-		return
+	// 查询所有需要自动查询的卡密（跨表查询）
+	tables := getQueryTables()
+	var allRows []struct {
+		cardNo      string
+		cardLink    string
+		queryToken  string
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cardNo, cardLink, queryToken string
-		if err := rows.Scan(&cardNo, &cardLink, &queryToken); err != nil {
+	
+	for _, table := range tables {
+		rows, err := db.Query(fmt.Sprintf(`
+			SELECT card_no, card_link, query_token
+			FROM %s
+			WHERE card_link IS NOT NULL
+			AND card_link != ''
+			ORDER BY created_at DESC`, table))
+		if err != nil {
+			log.Printf("自动查询失败(表 %s): %v", table, err)
 			continue
 		}
+		
+		for rows.Next() {
+			var cardNo, cardLink, queryToken string
+			if err := rows.Scan(&cardNo, &cardLink, &queryToken); err != nil {
+				continue
+			}
+			allRows = append(allRows, struct {
+				cardNo      string
+				cardLink    string
+				queryToken  string
+			}{cardNo, cardLink, queryToken})
+		}
+		rows.Close()
+	}
 
+	for _, row := range allRows {
 		// 使用 query_token 或 card_no 查询
-		token := queryToken
+		token := row.queryToken
 		if token == "" {
-			token = cardNo
+			token = row.cardNo
 		}
 
 		// 异步查询，使用信号量控制并发
@@ -473,7 +490,7 @@ func autoQueryPendingCardsAsync() {
 			semaphore <- struct{}{}        // 获取信号量
 			defer func() { <-semaphore }() // 释放信号量
 			queryRemoteCard(link, t)
-		}(cardLink, token)
+		}(row.cardLink, token)
 	}
 
 	// 等待所有查询完成
@@ -506,16 +523,30 @@ func queryRemoteCard(cardLink, cardNo string) {
 		code := extractVerificationCode(remoteResp.Data.Code)
 		expired := convertTimeFormat(remoteResp.Data.ExpiredDate)
 		log.Printf("获取到验证码: card=%s, code=%s, expired=%s", cardNo, code, expired)
-		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
-			code, expired, note, cardNo, cardNo)
+		
+		// 跨表更新
+		tables := getQueryTables()
+		for _, table := range tables {
+			_, err = db.Exec(fmt.Sprintf("UPDATE %s SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", table),
+				code, expired, note, cardNo, cardNo)
+			if err == nil {
+				break
+			}
+		}
 		if err != nil {
 			log.Printf("更新数据库失败: %v", err)
 		}
 	} else {
 		log.Printf("未获取到验证码: card=%s, code=%d", cardNo, remoteResp.Code)
 		// 只标记已查，不更新验证码
-		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
-			note, cardNo, cardNo)
+		tables := getQueryTables()
+		for _, table := range tables {
+			_, err = db.Exec(fmt.Sprintf("UPDATE %s SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", table),
+				note, cardNo, cardNo)
+			if err == nil {
+				break
+			}
+		}
 		if err != nil {
 			log.Printf("标记已查失败: %v", err)
 		}
