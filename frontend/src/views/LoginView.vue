@@ -44,7 +44,9 @@
         // 保存 token 和用户信息
         localStorage.setItem('admin_token', json.data.token)
         localStorage.setItem('user_id', json.data.user_id)
-        localStorage.setItem('is_admin', json.data.is_admin)
+        // 兼容后端返回的数字 1 或布尔值 true
+        const isAdminValue = json.data.is_admin === true || json.data.is_admin === 1 || json.data.is_admin === 'true'
+        localStorage.setItem('is_admin', isAdminValue ? 'true' : 'false')
         toast('登录成功', 'success')
         router.push('/admin/manage')
       } else {
