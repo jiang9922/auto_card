@@ -581,7 +581,7 @@ func getAllCards(c *gin.Context) {
 
 	// 合并查询并排序、分页
 	unionSQL := strings.Join(unionQueries, " UNION ALL ")
-	finalQuery := unionSQL + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	finalQuery := unionSQL + " ORDER BY created_at ASC LIMIT ? OFFSET ?"
 	dataArgs := append(args, pageSize, offset)
 
 	rows, err := db.Query(finalQuery, dataArgs...)
