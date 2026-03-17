@@ -42,10 +42,13 @@
 
 | 用例ID | 接口 | 方法 | 测试场景 | 预期结果 | 优先级 |
 |--------|------|------|----------|----------|--------|
-| API-001 | /api/cards/query | GET | 传入有效query_token | 返回 {code:0, data:{...}} | P0 |
-| API-002 | /api/cards/query | GET | 传入无效query_token | 返回 {code:1, message:"未找到"} | P0 |
-| API-003 | /api/cards/query | GET | 不传参数 | 返回 {code:1, message:"参数错误"} | P1 |
+| API-001 | /api/cards/query | GET | 传入有效query_token（异步模式） | 立即返回 {code:0, data:{card, task_status}} | P0 |
+| API-002 | /api/cards/query | GET | 传入无效query_token | 返回 {code:-1, message:"卡号不存在"} | P0 |
+| API-003 | /api/cards/query | GET | 不传参数 | 返回 {code:-1, message:"缺少 card 参数"} | P1 |
 | API-004 | /api/cards/live | GET | 正常请求 | 返回实时验证码列表 | P1 |
+| API-005 | /api/cards/query?sync=1 | GET | 同步模式查询 | 等待远程查询完成，返回完整数据 | P0 |
+| API-006 | /api/cards/status | GET | 轮询查询任务状态 | 返回 {code:0, data:{task_status, card}} | P0 |
+| API-007 | /api/cards/status | GET | 查询不存在的任务 | 返回 {code:-1, message:"未找到查询任务"} | P1 |
 
 ### 2.2 短信推送接口
 
