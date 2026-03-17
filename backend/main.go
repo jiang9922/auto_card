@@ -533,8 +533,21 @@ func updateRemark(c *gin.Context) {
 		return
 	}
 
-	_, err := db.Exec("UPDATE cards SET remark = ? WHERE id = ?", req.Remark, id)
-	if err != nil {
+	// 跨表更新
+	tables := getQueryTables()
+	updated := false
+	for _, table := range tables {
+		result, err := db.Exec(fmt.Sprintf("UPDATE %s SET remark = ? WHERE id = ?", table), req.Remark, id)
+		if err == nil {
+			rowsAffected, _ := result.RowsAffected()
+			if rowsAffected > 0 {
+				updated = true
+				break
+			}
+		}
+	}
+	
+	if !updated {
 		c.JSON(500, Response{Code: -1, Message: "更新备注失败"})
 		return
 	}
@@ -945,16 +958,26 @@ func batchDelete(c *gin.Context) {
 		c.JSON(500, Response{Code: -1, Message: "事务启动失败"})
 		return
 	}
-	stmt, err := tx.Prepare("DELETE FROM cards WHERE id = ?")
-	if err != nil {
-		tx.Rollback()
-		c.JSON(500, Response{Code: -1, Message: "准备语句失败"})
-		return
-	}
+	
+	// 跨表删除
+	tables := getQueryTables()
+	deletedCount := 0
+	
 	for _, id := range req.IDs {
-		_, err := stmt.Exec(id)
-		if err != nil {
-			log.Printf("删除失败 ID=%d: %v", id, err)
+		deleted := false
+		for _, table := range tables {
+			result, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE id = ?", table), id)
+			if err == nil {
+				rowsAffected, _ := result.RowsAffected()
+				if rowsAffected > 0 {
+					deleted = true
+					deletedCount++
+					break
+				}
+			}
+		}
+		if !deleted {
+			log.Printf("删除失败 ID=%d: 未找到", id)
 		}
 	}
 	tx.Commit()
@@ -1202,16 +1225,26 @@ func getCardQueryStatus(c *gin.Context) {
 		return
 	}
 
-	// 同时返回数据库中的最新数据
+	// 同时返回数据库中的最新数据（跨表查询）
 	var card Card
 	var queryURL, queryToken, code, expired, note, phone, remark sql.NullString
-	err := db.QueryRow(`
-		SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
-		FROM cards WHERE query_token = ? OR card_no = ?`, cardNo, cardNo).Scan(
-		&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expired, &note, &card.CardCheck)
 	
-	if err != nil {
-		log.Printf("查询本地卡密失败: %v", err)
+	found := false
+	tables := getQueryTables()
+	for _, table := range tables {
+		err := db.QueryRow(fmt.Sprintf(`
+			SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
+			FROM %s WHERE query_token = ? OR card_no = ?`, table), cardNo, cardNo).Scan(
+			&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expired, &note, &card.CardCheck)
+		
+		if err == nil {
+			found = true
+			break
+		}
+	}
+	
+	if !found {
+		log.Printf("查询本地卡密失败: %s", cardNo)
 	} else {
 		if queryURL.Valid {
 			card.QueryURL = &queryURL.String
