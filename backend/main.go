@@ -27,6 +27,11 @@ import (
 
 var db *sql.DB
 
+// 全局 HTTP Client，带超时设置
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
+
 // 获取数据库路径，优先从环境变量读取
 func getDBPath() string {
 	if path := os.Getenv("DB_PATH"); path != "" {
@@ -73,6 +78,21 @@ func init() {
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		log.Fatal("建表失败:", err)
+	}
+
+	// 创建索引优化查询性能
+	createIndexesSQL := `
+	CREATE INDEX IF NOT EXISTS idx_card_no ON cards(card_no);
+	CREATE INDEX IF NOT EXISTS idx_query_token ON cards(query_token);
+	CREATE INDEX IF NOT EXISTS idx_created_at ON cards(created_at);
+	CREATE INDEX IF NOT EXISTS idx_card_check ON cards(card_check);
+	CREATE INDEX IF NOT EXISTS idx_card_no_check ON cards(card_no, card_check);
+	`
+	_, err = db.Exec(createIndexesSQL)
+	if err != nil {
+		log.Printf("创建索引失败: %v", err)
+	} else {
+		log.Println("数据库索引创建成功")
 	}
 }
 
@@ -122,7 +142,7 @@ type BatchExportRequest struct {
 
 // 登录接口（明文口令校验）
 // 请求体：{ "password": string }
-// 处理：校验密码是否为 "jc123"
+// 处理：校验密码（优先从环境变量 ADMIN_PASSWORD 读取，默认 jc123）
 // 返回：成功 -> { code:0, data:{ token:"admin" } }；失败 -> 401
 func adminLogin(c *gin.Context) {
 	var req LoginRequest
@@ -131,7 +151,13 @@ func adminLogin(c *gin.Context) {
 		return
 	}
 
-	if req.Password != "jc123" {
+	// 从环境变量读取密码，默认 jc123
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if adminPassword == "" {
+		adminPassword = "jc123"
+	}
+
+	if req.Password != adminPassword {
 		c.JSON(401, Response{Code: -1, Message: "密码错误"})
 		return
 	}
@@ -299,10 +325,10 @@ func getAllCards(c *gin.Context) {
 // 查询参数：
 //   - limit：返回条数，默认 20
 // 返回：最近获取的验证码列表
-// 自动查询未获取验证码的卡密
+// 自动查询未获取验证码的卡密（异步执行，不阻塞响应）
 func getLiveCodes(c *gin.Context) {
-	// 先自动查询未获取验证码的卡密（同步查询，确保获取到最新数据）
-	autoQueryPendingCardsSync()
+	// 异步触发自动查询，不阻塞当前请求
+	go autoQueryPendingCardsAsync()
 
 	limitStr := c.Query("limit")
 	limit := 20
@@ -388,7 +414,7 @@ func autoQueryPendingCardsSync() {
 
 // 查询远程卡密信息（内部使用）
 func queryRemoteCard(cardLink, cardNo string) {
-	resp, err := http.Get(cardLink)
+	resp, err := httpClient.Get(cardLink)
 	if err != nil {
 		log.Printf("远程接口错误: %v", err)
 		return
@@ -951,7 +977,7 @@ func queryCard(c *gin.Context) {
 		}
 	}
 
-	resp, err := http.Get(cardLink)
+	resp, err := httpClient.Get(cardLink)
 	if err != nil {
 		c.JSON(500, Response{Code: -1, Message: "远程接口错误"})
 		return

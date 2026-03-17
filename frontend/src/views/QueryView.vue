@@ -221,6 +221,9 @@
           <div class="status">
             <span class="dot" :class="{ 'active': isPolling }"></span>
             {{ isPolling ? '实时监控中' : '已暂停' }}
+            <span v-if="codes.length > MAX_DISPLAY_COUNT" class="data-limit-hint">
+              (显示最新 {{ MAX_DISPLAY_COUNT }}/{{ codes.length }} 条)
+            </span>
           </div>
         </div>
       </div>
@@ -346,11 +349,16 @@ function verifyPassword() {
   }
 }
 
+// 最大显示条数限制，防止大量数据导致页面卡顿
+const MAX_DISPLAY_COUNT = 50
+
 // 可见的验证码列表（根据创建时间计算剩余时间）
 const visibleCodes = computed(() => {
   // 使用 now.value 确保每秒重新计算
   const currentTime = now.value || Date.now()
-  return codes.value.map(item => {
+  // 只处理最新的 N 条数据，防止大量数据导致卡顿
+  const recentCodes = codes.value.slice(0, MAX_DISPLAY_COUNT)
+  return recentCodes.map(item => {
     const createdTime = new Date(item.created_at).getTime()
     const elapsed = Math.floor((currentTime - createdTime) / 1000)
     const remaining = Math.max(0, 60 - elapsed) // 60秒（1分钟）倒计时
@@ -366,12 +374,15 @@ function cleanupExpiredCodes() {
   const currentTime = Date.now()
   const beforeCount = codes.value.length
   
-  // 清理已过期超过1分钟的数据（验证码显示时间结束后立即清理）
-  codes.value = codes.value.filter(item => {
-    const createdTime = new Date(item.created_at).getTime()
-    const elapsed = Math.floor((currentTime - createdTime) / 1000)
-    return elapsed < 60 // 60秒内保留，超过则删除
-  })
+  // 只保留最新的 100 条数据（后端可能返回更多，前端限制内存占用）
+  // 同时清理已过期超过 1 分钟的数据
+  codes.value = codes.value
+    .filter(item => {
+      const createdTime = new Date(item.created_at).getTime()
+      const elapsed = Math.floor((currentTime - createdTime) / 1000)
+      return elapsed < 60 // 60秒内保留，超过则删除
+    })
+    .slice(0, 100) // 最多保留 100 条，防止内存无限增长
   
   const afterCount = codes.value.length
   if (beforeCount !== afterCount) {
@@ -1106,6 +1117,12 @@ h2 {
   padding: 12px;
   color: #666;
   font-size: 14px;
+}
+
+.data-limit-hint {
+  color: #999;
+  font-size: 12px;
+  margin-left: 8px;
 }
 
 .dot {
