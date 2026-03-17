@@ -1275,10 +1275,13 @@ func batchDelete(c *gin.Context) {
 			log.Printf("删除失败 ID=%d: 未找到", id)
 		}
 	}
-	tx.Commit()
-	stmt.Close()
+	
+	if err := tx.Commit(); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "提交事务失败"})
+		return
+	}
 
-	c.JSON(200, Response{Code: 0, Message: "删除成功"})
+	c.JSON(200, Response{Code: 0, Message: fmt.Sprintf("删除成功，共删除 %d 条", deletedCount)})
 }
 
 // 批量导出卡密
@@ -1340,6 +1343,9 @@ func queryCard(c *gin.Context) {
 		return
 	}
 
+	// 检查是否为同步模式
+	syncMode := c.Query("sync") == "1"
+
 	var cardLink string
 	linkEnc := c.Query("link_enc")
 	linkPlain := c.Query("link")
@@ -1370,6 +1376,23 @@ func queryCard(c *gin.Context) {
 		}
 	}
 
+	// 同步模式：直接执行远程查询并返回结果
+	if syncMode {
+		log.Printf("同步查询模式: card=%s", cardNo)
+		result, err := queryRemoteCardSync(cardNo, cardLink)
+		if err != nil {
+			c.JSON(500, Response{Code: -1, Message: err.Error()})
+			return
+		}
+		c.JSON(200, Response{
+			Code:    0,
+			Message: "查询成功",
+			Data:    result,
+		})
+		return
+	}
+
+	// 异步模式：原来的逻辑
 	// 获取或创建查询任务
 	task := getOrCreateQueryTask(cardNo)
 
@@ -1499,6 +1522,108 @@ func queryRemoteCardAsync(cardNo, cardLink string) {
 		updateQueryTask(cardNo, "completed", nil, "暂未获取验证码")
 		log.Printf("异步查询完成（无验证码）: card=%s", cardNo)
 	}
+}
+
+// 同步查询远程卡密信息
+// 返回：查询结果或错误
+func queryRemoteCardSync(cardNo, cardLink string) (*Card, error) {
+	resp, err := httpClient.Get(cardLink)
+	if err != nil {
+		log.Printf("远程接口错误: %v", err)
+		return nil, fmt.Errorf("远程接口错误")
+	}
+	defer resp.Body.Close()
+
+	var remoteResp RemoteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&remoteResp); err != nil {
+		log.Printf("解析响应失败: %v", err)
+		return nil, fmt.Errorf("解析响应失败")
+	}
+
+	rawNote, _ := json.Marshal(remoteResp)
+	note := string(rawNote)
+
+	var card Card
+	var cardCode, expired string
+
+	// 校验验证码与过期时间
+	if remoteResp.Code == 1 && remoteResp.Data.Code != "" {
+		cardCode = extractVerificationCode(remoteResp.Data.Code)
+		expired = convertTimeFormat(remoteResp.Data.ExpiredDate)
+		
+		// 更新数据库（跨表更新）
+		tables := getQueryTables()
+		for _, table := range tables {
+			result, err := db.Exec(fmt.Sprintf("UPDATE %s SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", table),
+				cardCode, expired, note, cardNo, cardNo)
+			if err == nil {
+				rowsAffected, _ := result.RowsAffected()
+				if rowsAffected > 0 {
+					break
+				}
+			}
+		}
+		
+		card.CardCode = &cardCode
+		card.CardExpiredDate = &expired
+		card.CardNote = &note
+		card.CardCheck = true
+		
+		log.Printf("同步查询完成: card=%s, code=%s", cardNo, cardCode)
+	} else {
+		// 只标记已查，不更新验证码
+		tables := getQueryTables()
+		for _, table := range tables {
+			_, err = db.Exec(fmt.Sprintf("UPDATE %s SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", table),
+				note, cardNo, cardNo)
+			if err == nil {
+				break
+			}
+		}
+		
+		card.CardNote = &note
+		card.CardCheck = true
+		
+		log.Printf("同步查询完成（无验证码）: card=%s", cardNo)
+	}
+
+	// 查询更新后的完整数据
+	tables := getQueryTables()
+	var queryURL, queryToken, code, expiredStr, noteStr, phone, remark sql.NullString
+	
+	for _, table := range tables {
+		err := db.QueryRow(fmt.Sprintf(`
+			SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
+			FROM %s WHERE query_token = ? OR card_no = ?`, table), cardNo, cardNo).Scan(
+			&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expiredStr, &noteStr, &card.CardCheck)
+		
+		if err == nil {
+			if queryURL.Valid {
+				card.QueryURL = &queryURL.String
+			}
+			if queryToken.Valid {
+				card.QueryToken = &queryToken.String
+			}
+			if phone.Valid {
+				card.Phone = &phone.String
+			}
+			if remark.Valid {
+				card.Remark = &remark.String
+			}
+			if code.Valid {
+				card.CardCode = &code.String
+			}
+			if expiredStr.Valid {
+				card.CardExpiredDate = &expiredStr.String
+			}
+			if noteStr.Valid {
+				card.CardNote = &noteStr.String
+			}
+			break
+		}
+	}
+
+	return &card, nil
 }
 
 // 获取查询任务状态
