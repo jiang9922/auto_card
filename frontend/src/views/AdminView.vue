@@ -23,9 +23,46 @@
             <button @click="createBackup" :disabled="loading" class="btn-primary">
               {{ loading ? '创建中...' : '📥 创建新备份' }}
             </button>
+            <button @click="exportFullCSV" :disabled="loading" class="btn-success">
+              {{ loading ? '导出中...' : '📄 导出完整数据(CSV)' }}
+            </button>
             <button @click="loadBackups" :disabled="loading" class="btn-secondary">
               🔄 刷新列表
             </button>
+          </div>
+          
+          <!-- CSV 导入区域 -->
+          <div class="import-section">
+            <h4>📤 从 CSV 导入数据</h4>
+            <div class="import-form">
+              <input 
+                type="file" 
+                ref="csvFileInput" 
+                accept=".csv" 
+                style="display: none"
+                @change="handleCSVUpload"
+              />
+              <button @click="triggerCSVUpload" :disabled="loading" class="btn-import">
+                选择 CSV 文件
+              </button>
+              <span v-if="selectedFileName" class="file-name">{{ selectedFileName }}</span>
+              <button 
+                v-if="selectedFileName" 
+                @click="confirmImport" 
+                :disabled="loading" 
+                class="btn-primary btn-import-confirm"
+              >
+                {{ loading ? '导入中...' : '开始导入' }}
+              </button>
+            </div>
+            <div class="import-tips">
+              <p>CSV 格式要求：</p>
+              <ul>
+                <li>第一行为表头：序号、卡号、原链接、查询链接、查询Token、状态、备注、创建时间</li>
+                <li>数据从第二行开始</li>
+                <li>已存在的卡号会自动跳过</li>
+              </ul>
+            </div>
           </div>
           
           <!-- 备份列表 -->
@@ -79,7 +116,7 @@
 // 管理页：承载 AdminTable，并提供登录校验与退出登录
 import AdminTable from '../components/AdminTable.vue'
 import { useRouter } from 'vue-router'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch, type Ref } from 'vue'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -109,6 +146,11 @@ const confirmModal = ref<ConfirmModal>({
   message: '',
   onConfirm: () => {}
 })
+
+// CSV 导入相关
+const csvFileInput = ref<HTMLInputElement | null>(null)
+const selectedFileName = ref('')
+const selectedFile: Ref<File | null> = ref(null)
 
 // 获取 API 基础地址
 function getBaseURL() {
@@ -249,6 +291,98 @@ function formatSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
+// 导出完整 CSV
+async function exportFullCSV() {
+  loading.value = true
+  try {
+    const res = await fetch(`${getBaseURL()}/api/admin/export/full`)
+    if (!res.ok) {
+      toast('导出失败', 'error')
+      return
+    }
+    
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `cards_export_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    toast('CSV 导出成功', 'success')
+  } catch (err) {
+    toast('导出 CSV 失败', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 处理 CSV 文件选择
+function handleCSVUpload(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (file) {
+    selectedFile.value = file
+    selectedFileName.value = file.name
+  }
+}
+
+// 触发 CSV 文件选择
+function triggerCSVUpload() {
+  csvFileInput.value?.click()
+}
+
+// 确认导入
+function confirmImport() {
+  if (!selectedFile.value) {
+    toast('请先选择 CSV 文件', 'error')
+    return
+  }
+  
+  confirmModal.value = {
+    show: true,
+    title: '确认导入数据',
+    message: `确定要导入文件 "${selectedFileName.value}" 吗？\n已存在的卡号会被自动跳过。`,
+    onConfirm: async () => {
+      confirmModal.value.show = false
+      await importCSV()
+    }
+  }
+}
+
+// 执行 CSV 导入
+async function importCSV() {
+  if (!selectedFile.value) return
+  
+  loading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', selectedFile.value)
+    
+    const res = await fetch(`${getBaseURL()}/api/admin/import`, {
+      method: 'POST',
+      body: formData
+    })
+    const json = await res.json()
+    if (json.code === 0) {
+      toast(json.message, 'success')
+      // 清空选择
+      selectedFile.value = null
+      selectedFileName.value = ''
+      if (csvFileInput.value) {
+        csvFileInput.value.value = ''
+      }
+    } else {
+      toast(json.message || '导入失败', 'error')
+    }
+  } catch (err) {
+    toast('导入 CSV 失败', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(() => {
   // 进入页面时若无 token 则重定向到登录
   const token = localStorage.getItem('admin_token')
@@ -258,7 +392,6 @@ onMounted(() => {
 })
 
 // 打开备份弹窗时加载列表
-import { watch } from 'vue'
 watch(showBackupModal, (val) => {
   if (val) loadBackups()
 })
@@ -437,6 +570,94 @@ h2 { color: #333; }
 .btn-icon:hover { background: #e9ecef; }
 
 .btn-danger:hover { background: #dc3545; color: #fff; border-color: #dc3545; }
+
+/* CSV 导入区域 */
+.import-section {
+  margin: 20px 0;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.import-section h4 {
+  margin: 0 0 12px 0;
+  color: #333;
+  font-size: 14px;
+}
+
+.import-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-success {
+  background: #28a745;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-success:hover:not(:disabled) { background: #218838; }
+.btn-success:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-import {
+  background: #17a2b8;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-import:hover:not(:disabled) { background: #138496; }
+.btn-import:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-import-confirm {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+.file-name {
+  font-size: 13px;
+  color: #666;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-tips {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border-radius: 6px;
+  border-left: 3px solid #ffc107;
+}
+
+.import-tips p {
+  margin: 0 0 6px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+}
+
+.import-tips ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: #666;
+}
+
+.import-tips li {
+  margin-bottom: 2px;
+}
 
 /* 提示信息 */
 .backup-tips {

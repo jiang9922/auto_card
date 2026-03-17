@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -1076,6 +1077,219 @@ func deleteBackup(c *gin.Context) {
 	c.JSON(200, Response{Code: 0, Message: "删除成功"})
 }
 
+// ==================== CSV 导出/导入功能 ====================
+
+// 导出所有卡密数据为 CSV
+func exportFullCSV(c *gin.Context) {
+	// 获取需要查询的所有表（主表+分表）
+	tables := getQueryTables()
+
+	// 设置响应头
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"cards_export_%s.csv\"", time.Now().Format("20060102_150405")))
+
+	// 创建 CSV writer
+	writer := csv.NewWriter(c.Writer)
+	defer writer.Flush()
+
+	// 写入表头
+	headers := []string{"序号", "卡号", "原链接", "查询链接", "查询Token", "状态", "备注", "创建时间"}
+	if err := writer.Write(headers); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "写入CSV表头失败: " + err.Error()})
+		return
+	}
+
+	// 从所有表中查询数据
+	for _, table := range tables {
+		rows, err := db.Query(fmt.Sprintf(`
+			SELECT id, card_no, card_link, query_url, query_token, card_check, remark, created_at 
+			FROM %s ORDER BY id ASC`, table))
+		if err != nil {
+			log.Printf("查询表 %s 失败: %v", table, err)
+			continue
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var id int
+			var cardNo, cardLink string
+			var queryURL, queryToken, remark sql.NullString
+			var cardCheck bool
+			var createdAt string
+
+			err := rows.Scan(&id, &cardNo, &cardLink, &queryURL, &queryToken, &cardCheck, &remark, &createdAt)
+			if err != nil {
+				log.Printf("扫描数据失败: %v", err)
+				continue
+			}
+
+			// 转换状态
+			status := "未查询"
+			if cardCheck {
+				status = "已查询"
+			}
+
+			// 处理空值
+			qURL := ""
+			if queryURL.Valid {
+				qURL = queryURL.String
+			}
+			qToken := ""
+			if queryToken.Valid {
+				qToken = queryToken.String
+			}
+			rem := ""
+			if remark.Valid {
+				rem = remark.String
+			}
+
+			record := []string{
+				strconv.Itoa(id),
+				cardNo,
+				cardLink,
+				qURL,
+				qToken,
+				status,
+				rem,
+				createdAt,
+			}
+			if err := writer.Write(record); err != nil {
+				log.Printf("写入CSV行失败: %v", err)
+				continue
+			}
+		}
+	}
+}
+
+// 从 CSV 导入恢复数据
+type ImportResult struct {
+	Total      int      `json:"total"`
+	Success    int      `json:"success"`
+	Skipped    int      `json:"skipped"`
+	Failed     int      `json:"failed"`
+	FailedRows []string `json:"failed_rows,omitempty"`
+}
+
+func importFromCSV(c *gin.Context) {
+	// 获取上传的文件
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(400, Response{Code: -1, Message: "获取上传文件失败: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	// 读取文件内容
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1 // 允许变长字段
+
+	// 读取所有记录
+	records, err := reader.ReadAll()
+	if err != nil {
+		c.JSON(400, Response{Code: -1, Message: "解析CSV失败: " + err.Error()})
+		return
+	}
+
+	if len(records) < 2 {
+		c.JSON(400, Response{Code: -1, Message: "CSV文件为空或格式不正确"})
+		return
+	}
+
+	// 跳过表头，从第二行开始处理
+	result := ImportResult{
+		Total:      len(records) - 1,
+		Success:    0,
+		Skipped:    0,
+		Failed:     0,
+		FailedRows: []string{},
+	}
+
+	baseURL := getBaseURL(c)
+
+	// 使用事务批量插入
+	tx, err := db.Begin()
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "开启事务失败: " + err.Error()})
+		return
+	}
+	defer tx.Rollback()
+
+	for i, record := range records[1:] {
+		rowNum := i + 2 // 实际行号（从1开始，跳过表头）
+
+		// 检查字段数量
+		if len(record) < 8 {
+			result.Failed++
+			result.FailedRows = append(result.FailedRows, fmt.Sprintf("第%d行: 字段数量不足", rowNum))
+			continue
+		}
+
+		// 解析字段
+		cardNo := strings.TrimSpace(record[1])     // 卡号
+		cardLink := strings.TrimSpace(record[2])   // 原链接
+		// queryURL := strings.TrimSpace(record[3])   // 查询链接（导入时重新生成）
+		// queryToken := strings.TrimSpace(record[4]) // 查询Token（导入时重新生成）
+		statusStr := strings.TrimSpace(record[5])  // 状态
+		remark := strings.TrimSpace(record[6])     // 备注
+		// createdAt := strings.TrimSpace(record[7])  // 创建时间（使用当前时间）
+
+		// 验证必填字段
+		if cardNo == "" || cardLink == "" {
+			result.Failed++
+			result.FailedRows = append(result.FailedRows, fmt.Sprintf("第%d行: 卡号或原链接为空", rowNum))
+			continue
+		}
+
+		// 检查卡号是否已存在
+		var exists bool
+		err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM cards WHERE card_no = ?)", cardNo).Scan(&exists)
+		if err != nil {
+			result.Failed++
+			result.FailedRows = append(result.FailedRows, fmt.Sprintf("第%d行: 检查重复失败", rowNum))
+			continue
+		}
+		if exists {
+			result.Skipped++
+			continue
+		}
+
+		// 生成新的查询Token和URL
+		randomSuffix := generateRandomString(6)
+		queryToken := fmt.Sprintf("%s_%s", cardNo, randomSuffix)
+		queryURL := fmt.Sprintf("%s/query?card=%s", baseURL, url.QueryEscape(queryToken))
+
+		// 解析状态
+		cardCheck := 0
+		if statusStr == "已查询" || statusStr == "1" || statusStr == "true" {
+			cardCheck = 1
+		}
+
+		// 插入数据
+		_, err = tx.Exec(
+			"INSERT INTO cards (card_no, card_link, remark, query_url, query_token, card_check, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+			cardNo, cardLink, remark, queryURL, queryToken, cardCheck,
+		)
+		if err != nil {
+			result.Failed++
+			result.FailedRows = append(result.FailedRows, fmt.Sprintf("第%d行: %s", rowNum, err.Error()))
+			continue
+		}
+
+		result.Success++
+	}
+
+	if err := tx.Commit(); err != nil {
+		c.JSON(500, Response{Code: -1, Message: "提交事务失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: fmt.Sprintf("导入完成: 成功 %d, 跳过 %d, 失败 %d", result.Success, result.Skipped, result.Failed),
+		Data:    result,
+	})
+}
+
 // 下载备份文件
 func downloadBackup(c *gin.Context) {
 	name := c.Query("name")
@@ -2008,6 +2222,8 @@ func main() {
 		api.GET("/admin/backup/download", downloadBackup)   // 下载备份
 		api.POST("/admin/restore", restoreBackup)           // 恢复备份
 		api.DELETE("/admin/backup/:name", deleteBackup)     // 删除备份
+		api.GET("/admin/export/full", exportFullCSV)        // 导出完整CSV
+		api.POST("/admin/import", importFromCSV)            // 从CSV导入
 		api.GET("/cards/query", queryCard)
 		api.GET("/cards/status", getCardQueryStatus)        // 查询任务状态
 		api.GET("/cards/live", getLiveCodes)
