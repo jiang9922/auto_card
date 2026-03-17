@@ -1065,16 +1065,21 @@ func queryCard(c *gin.Context) {
 	}
 
 	// 立即返回当前状态，不等待
-	// 尝试获取当前数据库中的数据
+	// 尝试获取当前数据库中的数据（跨表查询）
 	var card Card
 	var queryURL, queryToken, code, expired, note, phone, remark sql.NullString
-	err := db.QueryRow(`
-		SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
-		FROM cards WHERE query_token = ? OR card_no = ?`, cardNo, cardNo).Scan(
-		&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expired, &note, &card.CardCheck)
 	
-	if err != nil {
-		log.Printf("查询本地卡密失败: %v", err)
+	// 在所有表中查询
+	tables := getQueryTables()
+	for _, table := range tables {
+		err := db.QueryRow(fmt.Sprintf(`
+			SELECT id, card_no, card_link, phone, remark, query_url, query_token, created_at, card_code, card_expired_date, card_note, card_check 
+			FROM %s WHERE query_token = ? OR card_no = ?`, table), cardNo, cardNo).Scan(
+			&card.ID, &card.CardNo, &card.CardLink, &phone, &remark, &queryURL, &queryToken, &card.CreatedAt, &code, &expired, &note, &card.CardCheck)
+		
+		if err == nil {
+			break // 找到了
+		}
 	}
 	
 	if queryURL.Valid {
@@ -1134,11 +1139,23 @@ func queryRemoteCardAsync(cardNo, cardLink string) {
 		code := extractVerificationCode(remoteResp.Data.Code)
 		expired := convertTimeFormat(remoteResp.Data.ExpiredDate)
 		
-		// 更新数据库
-		_, err = db.Exec("UPDATE cards SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
-			code, expired, note, cardNo, cardNo)
-		if err != nil {
-			log.Printf("更新数据库失败: %v", err)
+		// 更新数据库（跨表更新）
+		tables := getQueryTables()
+		updated := false
+		for _, table := range tables {
+			result, err := db.Exec(fmt.Sprintf("UPDATE %s SET card_code=?, card_expired_date=?, card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", table),
+				code, expired, note, cardNo, cardNo)
+			if err == nil {
+				rowsAffected, _ := result.RowsAffected()
+				if rowsAffected > 0 {
+					updated = true
+					break
+				}
+			}
+		}
+		
+		if !updated {
+			log.Printf("更新数据库失败: 未找到卡号 %s", cardNo)
 		}
 		
 		// 更新任务状态
@@ -1152,10 +1169,13 @@ func queryRemoteCardAsync(cardNo, cardLink string) {
 		log.Printf("异步查询完成: card=%s, code=%s", cardNo, code)
 	} else {
 		// 只标记已查，不更新验证码
-		_, err = db.Exec("UPDATE cards SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?",
-			note, cardNo, cardNo)
-		if err != nil {
-			log.Printf("标记已查失败: %v", err)
+		tables := getQueryTables()
+		for _, table := range tables {
+			_, err = db.Exec(fmt.Sprintf("UPDATE %s SET card_note=?, card_check=1 WHERE query_token = ? OR card_no = ?", table),
+				note, cardNo, cardNo)
+			if err == nil {
+				break
+			}
 		}
 		
 		updateQueryTask(cardNo, "completed", nil, "暂未获取验证码")

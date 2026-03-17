@@ -287,27 +287,113 @@ const cardLoading = ref(false)
 const cardVerified = ref(false)
 const cardError = ref('')
 
-// 验证卡号是否存在（类似 card_v01 的逻辑）
+// 查询状态轮询
+let queryStatusTimer: any = null
+const queryStatus = ref<'pending' | 'querying' | 'completed' | 'failed'>('pending')
+const queryError = ref('')
+const currentCardData = ref<any>(null)
+
+// 验证卡号并触发异步查询（按需查询模式）
 async function verifyCard(token: string) {
   cardLoading.value = true
   cardError.value = ''
   cardVerified.value = false
+  queryStatus.value = 'pending'
+  queryError.value = ''
   
   try {
+    // 步骤1: 触发异步查询
     const res = await fetch(`/api/cards/query?card=${encodeURIComponent(token)}`)
     const json = await res.json()
     
-    if (json.code === 0 && json.data) {
-      // 卡号存在
-      cardVerified.value = true
-    } else {
-      // 卡号不存在
+    if (json.code !== 0) {
+      // 卡号不存在或其他错误
       cardError.value = json.message || '手机号不存在'
+      cardLoading.value = false
+      return
     }
+    
+    // 卡号存在，开始轮询查询状态
+    cardVerified.value = true
+    queryStatus.value = json.data?.task_status || 'querying'
+    currentCardData.value = json.data?.card || null
+    
+    // 如果已有验证码，立即显示
+    if (currentCardData.value?.card_code) {
+      updateCardDisplay(currentCardData.value)
+    }
+    
+    // 步骤2: 开始轮询查询状态（每2秒一次，最多30次 = 60秒）
+    startQueryStatusPolling(token)
+    
   } catch (err) {
     cardError.value = '验证失败'
-  } finally {
     cardLoading.value = false
+  }
+}
+
+// 轮询查询状态
+let pollCount = 0
+const MAX_POLL_COUNT = 30
+
+function startQueryStatusPolling(token: string) {
+  pollCount = 0
+  cardLoading.value = false // 立即结束加载状态，让用户看到界面
+  
+  // 清除之前的轮询
+  if (queryStatusTimer) {
+    clearInterval(queryStatusTimer)
+  }
+  
+  queryStatusTimer = setInterval(async () => {
+    pollCount++
+    
+    // 超过最大轮询次数，停止轮询
+    if (pollCount > MAX_POLL_COUNT) {
+      clearInterval(queryStatusTimer)
+      queryStatusTimer = null
+      queryStatus.value = 'completed'
+      return
+    }
+    
+    try {
+      const res = await fetch(`/api/cards/status?card=${encodeURIComponent(token)}`)
+      const json = await res.json()
+      
+      if (json.code === 0 && json.data) {
+        queryStatus.value = json.data.task_status
+        queryError.value = json.data.task_error || ''
+        currentCardData.value = json.data.card
+        
+        // 更新显示
+        if (currentCardData.value) {
+          updateCardDisplay(currentCardData.value)
+        }
+        
+        // 查询完成，停止轮询
+        if (queryStatus.value === 'completed' || queryStatus.value === 'failed') {
+          clearInterval(queryStatusTimer)
+          queryStatusTimer = null
+        }
+      }
+    } catch (err) {
+      console.error('轮询查询状态失败:', err)
+    }
+  }, 2000) // 每2秒轮询一次
+}
+
+// 更新卡密显示
+function updateCardDisplay(cardData: any) {
+  // 更新 cardMatchedCode 用于显示
+  if (cardData.card_code) {
+    cardMatchedCode.value = {
+      id: cardData.id,
+      phone: cardData.phone || cardPhone.value,
+      card_code: cardData.card_code,
+      created_at: cardData.created_at
+    }
+    // 重置倒计时
+    cardFetchedAt.value = Date.now()
   }
 }
 
@@ -578,6 +664,10 @@ onUnmounted(() => {
   if (cleanupTimer) {
     clearInterval(cleanupTimer)
     cleanupTimer = null
+  }
+  if (queryStatusTimer) {
+    clearInterval(queryStatusTimer)
+    queryStatusTimer = null
   }
   // 移除页面可见性监听
   document.removeEventListener('visibilitychange', handleVisibilityChange)
