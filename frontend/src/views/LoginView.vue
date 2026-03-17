@@ -41,8 +41,10 @@
       })
       const json = await res.json()
       if (json.code === 0) {
-        // 保存 token 并跳转后台
+        // 保存 token 和用户信息
         localStorage.setItem('admin_token', json.data.token)
+        localStorage.setItem('user_id', json.data.user_id)
+        localStorage.setItem('is_admin', json.data.is_admin)
         toast('登录成功', 'success')
         router.push('/admin/manage')
       } else {

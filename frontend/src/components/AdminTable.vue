@@ -159,6 +159,16 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
+
+// 获取认证头
+function getAuthHeaders() {
+  const token = localStorage.getItem('admin_token')
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+  }
+}
+
 // 列表与分页数据
 const cards = ref<any[]>([])
 const displayedCards = ref<any[]>([])
@@ -230,7 +240,9 @@ async function load(page: number = 1) {
       url += `&status=${filters.value.status}`
     }
     
-    const res = await fetch(url)
+    const res = await fetch(url, {
+      headers: getAuthHeaders()
+    })
     const json = await res.json()
     
     if (json.code === 0 && json.data) {
@@ -335,7 +347,7 @@ async function del(ids: number[]) {
   try {
     await fetch('/api/admin/batch-delete', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ ids })
     })
     toast('删除成功', 'success')
@@ -406,7 +418,7 @@ async function add() {
     
     const res = await fetch('/api/cards', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ 
         text: processedText,
         allow_duplicates: allowDuplicates.value,
@@ -546,7 +558,7 @@ async function saveRemark(card: any) {
   try {
     const res = await fetch('/api/cards/' + card.id + '/remark', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ remark: card.remark })
     })
     const json = await res.json()

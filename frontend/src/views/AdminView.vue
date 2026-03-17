@@ -59,7 +59,37 @@
             </div>
           </div>
           
-          <!-- 提示信息 -->
+          <!-- 副密码管理（仅管理员可见） -->
+          <div v-if="isAdmin" class="users-section">
+            <h4 @click="showUsersSection = !showUsersSection" class="section-title">
+              👥 副密码管理 {{ showUsersSection ? '▼' : '▶' }}
+            </h4>
+            <div v-if="showUsersSection">
+              <div class="users-list">
+                <div v-for="user in users" :key="user.id" class="user-item">
+                  <span class="user-password">{{ user.password }}</span>
+                  <span class="user-type">{{ user.is_admin ? '管理员' : '副密码' }}</span>
+                  <button 
+                    v-if="!user.is_admin" 
+                    @click="deleteUser(user.id)" 
+                    class="btn-icon btn-danger"
+                    title="删除"
+                  >🗑️</button>
+                </div>
+              </div>
+              <div class="add-user-form">
+                <input 
+                  v-model="newUserPassword" 
+                  type="text" 
+                  placeholder="输入新密码" 
+                  class="user-input"
+                />
+                <button @click="addUser" :disabled="!newUserPassword || loading" class="btn-primary">
+                  添加副密码
+                </button>
+              </div>
+            </div>
+          </div>
           <div class="backup-tips">
             <p>💡 提示：</p>
             <ul>
@@ -118,16 +148,33 @@ const csvFileInput = ref<HTMLInputElement | null>(null)
 const selectedFileName = ref('')
 const selectedFile: Ref<File | null> = ref(null)
 
+// 用户管理相关
+const isAdmin = ref(false)
+const showUsersSection = ref(false)
+const users = ref<any[]>([])
+const newUserPassword = ref('')
+
 // 获取 API 基础地址
 function getBaseURL() {
   return import.meta.env.VITE_API_BASE_URL || ''
+}
+
+// 获取认证头
+function getAuthHeaders() {
+  const token = localStorage.getItem('admin_token')
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+  }
 }
 
 // 导出完整 CSV
 async function exportFullCSV() {
   loading.value = true
   try {
-    const res = await fetch(`${getBaseURL()}/api/admin/export/full`)
+    const res = await fetch(`${getBaseURL()}/api/admin/export/full`, {
+      headers: getAuthHeaders()
+    })
     if (!res.ok) {
       toast('导出失败', 'error')
       return
@@ -192,8 +239,12 @@ async function importCSV() {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
     
+    const token = localStorage.getItem('admin_token')
     const res = await fetch(`${getBaseURL()}/api/admin/import`, {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
       body: formData
     })
     const json = await res.json()
@@ -222,8 +273,87 @@ onMounted(() => {
   const token = localStorage.getItem('admin_token')
   if (!token) {
     router.replace('/login')
+    return
+  }
+  // 检查是否是管理员
+  isAdmin.value = localStorage.getItem('is_admin') === 'true'
+})
+
+// 打开备份弹窗时加载用户列表
+watch(showBackupModal, (val) => {
+  if (val && isAdmin.value) {
+    loadUsers()
   }
 })
+
+// 用户管理功能
+async function loadUsers() {
+  if (!isAdmin.value) return
+  try {
+    const res = await fetch(`${getBaseURL()}/api/admin/users`, {
+      headers: getAuthHeaders()
+    })
+    const json = await res.json()
+    if (json.code === 0) {
+      users.value = json.data || []
+    }
+  } catch (err) {
+    console.error('加载用户列表失败', err)
+  }
+}
+
+async function addUser() {
+  if (!newUserPassword.value) return
+  loading.value = true
+  try {
+    const res = await fetch(`${getBaseURL()}/api/admin/users`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ password: newUserPassword.value })
+    })
+    const json = await res.json()
+    if (json.code === 0) {
+      toast('添加成功', 'success')
+      newUserPassword.value = ''
+      loadUsers()
+    } else {
+      toast(json.message || '添加失败', 'error')
+    }
+  } catch (err) {
+    toast('添加失败', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+function deleteUser(userId: number) {
+  confirmModal.value = {
+    show: true,
+    title: '确认删除',
+    message: '确定要删除这个副密码吗？该用户的所有卡密也会被删除。',
+    onConfirm: async () => {
+      confirmModal.value.show = false
+      loading.value = true
+      try {
+        const res = await fetch(`${getBaseURL()}/api/admin/users/${userId}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        })
+        const json = await res.json()
+        if (json.code === 0) {
+          toast('删除成功', 'success')
+          loadUsers()
+        } else {
+          toast(json.message || '删除失败', 'error')
+        }
+      } catch (err) {
+        toast('删除失败', 'error')
+      } finally {
+        loading.value = false
+      }
+    }
+  }
+}
 
 function logout() {
   // 清除 token，提示后跳转到登录页
@@ -533,5 +663,63 @@ h2 { color: #333; }
   display: flex;
   gap: 12px;
   justify-content: center;
+}
+
+/* 用户管理 */
+.users-section {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.section-title {
+  margin: 0 0 12px 0;
+  cursor: pointer;
+  color: #333;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.users-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.user-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fff;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.user-password {
+  font-family: monospace;
+  font-size: 14px;
+}
+
+.user-type {
+  font-size: 12px;
+  color: #666;
+  padding: 2px 8px;
+  background: #e9ecef;
+  border-radius: 4px;
+}
+
+.add-user-form {
+  display: flex;
+  gap: 8px;
+}
+
+.user-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
 }
 </style>

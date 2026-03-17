@@ -112,17 +112,6 @@ func getDBPath() string {
 }
 
 // 初始化数据库连接与表结构
-// 1. 打开 SQLite 数据库文件 `cards.db`
-// 2. 如表不存在则创建 `cards` 表，字段包含：
-//   - id: 主键自增
-//   - card_no: 卡号，唯一
-//   - card_link: 远程查询接口链接
-//   - query_url: 后端生成的本系统查询地址
-//   - created_at: 创建时间
-//   - card_code: 验证码（解析后写入）
-//   - card_expired_date: 验证码过期时间（标准化）
-//   - card_note: 原始响应保存便于审计
-//   - card_check: 是否已查询
 func init() {
 	var err error
 	dbPath := getDBPath()
@@ -130,6 +119,22 @@ func init() {
 	if err != nil {
 		log.Fatal("数据库打开失败:", err)
 	}
+
+	// 创建用户表
+	createUsersTableSQL := `
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		password TEXT UNIQUE NOT NULL,
+		is_admin BOOLEAN DEFAULT FALSE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+	_, err = db.Exec(createUsersTableSQL)
+	if err != nil {
+		log.Fatal("创建用户表失败:", err)
+	}
+
+	// 创建默认管理员账号
+	initDefaultAdmin()
 
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS cards (
@@ -144,12 +149,16 @@ func init() {
 		card_code TEXT,
 		card_expired_date TEXT,
 		card_note TEXT,
-		card_check BOOLEAN DEFAULT FALSE
+		card_check BOOLEAN DEFAULT FALSE,
+		user_id INTEGER DEFAULT 1
 	);`
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		log.Fatal("建表失败:", err)
 	}
+
+	// 为现有数据设置默认 user_id
+	_, _ = db.Exec("UPDATE cards SET user_id = 1 WHERE user_id IS NULL")
 
 	// 创建索引优化查询性能
 	createIndexesSQL := `
@@ -158,6 +167,7 @@ func init() {
 	CREATE INDEX IF NOT EXISTS idx_created_at ON cards(created_at);
 	CREATE INDEX IF NOT EXISTS idx_card_check ON cards(card_check);
 	CREATE INDEX IF NOT EXISTS idx_card_no_check ON cards(card_no, card_check);
+	CREATE INDEX IF NOT EXISTS idx_user_id ON cards(user_id);
 	`
 	_, err = db.Exec(createIndexesSQL)
 	if err != nil {
@@ -171,6 +181,26 @@ func init() {
 
 	// 启动归档任务（每天凌晨3点执行）
 	go startArchiveTask()
+}
+
+// 初始化默认管理员账号
+func initDefaultAdmin() {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err != nil {
+		log.Printf("检查用户数量失败: %v", err)
+		return
+	}
+	
+	if count == 0 {
+		// 创建默认管理员
+		_, err = db.Exec("INSERT INTO users (password, is_admin) VALUES (?, ?)", "jc123", true)
+		if err != nil {
+			log.Printf("创建默认管理员失败: %v", err)
+		} else {
+			log.Println("创建默认管理员账号成功: jc123")
+		}
+	}
 }
 
 // ==================== 分表管理 ====================
@@ -443,8 +473,8 @@ func escapeCard(card Card) Card {
 
 // 登录接口（明文口令校验）
 // 请求体：{ "password": string }
-// 处理：校验密码（优先从环境变量 ADMIN_PASSWORD 读取，默认 jc123）
-// 返回：成功 -> { code:0, data:{ token:"admin" } }；失败 -> 401
+// 处理：校验密码（查询 users 表）
+// 返回：成功 -> { code:0, data:{ token:"user_id:password", user_id: 1, is_admin: true } }；失败 -> 401
 func adminLogin(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -452,35 +482,94 @@ func adminLogin(c *gin.Context) {
 		return
 	}
 
-	// 从环境变量读取密码，默认 jc123
-	adminPassword := os.Getenv("ADMIN_PASSWORD")
-	if adminPassword == "" {
-		adminPassword = "jc123"
-	}
-
-	if req.Password != adminPassword {
+	// 查询用户表验证密码
+	var userID int
+	var isAdmin bool
+	err := db.QueryRow("SELECT id, is_admin FROM users WHERE password = ?", req.Password).Scan(&userID, &isAdmin)
+	if err != nil {
 		c.JSON(401, Response{Code: -1, Message: "密码错误"})
 		return
 	}
 
-	c.JSON(200, Response{Code: 0, Message: "登录成功", Data: map[string]string{"token": "admin"}})
+	// 生成 token: user_id:password
+	token := fmt.Sprintf("%d:%s", userID, req.Password)
+
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "登录成功",
+		Data: map[string]interface{}{
+			"token":     token,
+			"user_id":   userID,
+			"is_admin":  isAdmin,
+		},
+	})
 }
 
 // 管理员 Token 校验接口
-// 输入：请求头 `Authorization: Bearer admin`
-// 处理：解析 Bearer Token，与约定的固定值 "admin" 比较
-// 输出：通过 -> 200 { code:0 }；未授权 -> 401 { code:-1 }
+// 输入：请求头 `Authorization: Bearer user_id:password`
+// 处理：解析 Bearer Token，验证用户存在
+// 输出：通过 -> 200 { code:0, data: {user_id, is_admin} }；未授权 -> 401
 func adminVerify(c *gin.Context) {
 	auth := c.GetHeader("Authorization")
 	token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-	if token != "admin" {
+	
+	// 解析 token
+	parts := strings.Split(token, ":")
+	if len(parts) != 2 {
+		c.JSON(401, Response{Code: -1, Message: "无效的 token"})
+		return
+	}
+	
+	password := parts[1]
+	
+	// 查询用户
+	var userID int
+	var isAdmin bool
+	err := db.QueryRow("SELECT id, is_admin FROM users WHERE password = ?", password).Scan(&userID, &isAdmin)
+	if err != nil {
 		c.JSON(401, Response{Code: -1, Message: "未授权"})
 		return
 	}
-	c.JSON(200, Response{Code: 0, Message: "ok"})
+	
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "ok",
+		Data: map[string]interface{}{
+			"user_id":  userID,
+			"is_admin": isAdmin,
+		},
+	})
 }
 
-// 获取卡密列表（分页+筛选）
+// AuthMiddleware 认证中间件，从 token 中提取用户信息
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		auth := c.GetHeader("Authorization")
+		token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		
+		parts := strings.Split(token, ":")
+		if len(parts) != 2 {
+			c.JSON(401, Response{Code: -1, Message: "未授权"})
+			c.Abort()
+			return
+		}
+		
+		password := parts[1]
+		
+		var userID int
+		var isAdmin bool
+		err := db.QueryRow("SELECT id, is_admin FROM users WHERE password = ?", password).Scan(&userID, &isAdmin)
+		if err != nil {
+			c.JSON(401, Response{Code: -1, Message: "未授权"})
+			c.Abort()
+			return
+		}
+		
+		c.Set("user_id", userID)
+		c.Set("is_admin", isAdmin)
+		c.Next()
+	}
+}
 // 查询参数：
 //   - page, page_size：分页控制
 //   - date：按 `YYYY-MM-DD` 过滤 created_at
@@ -514,12 +603,22 @@ func getAllCards(c *gin.Context) {
 	phoneFilter := c.Query("phone")     // 手机号筛选
 	cardNoFilter := c.Query("card_no")  // 卡号搜索
 
+	// 获取当前用户信息
+	userID, _ := c.Get("user_id")
+	isAdmin, _ := c.Get("is_admin")
+
 	// 获取需要查询的所有表（主表+分表）
 	tables := getQueryTables()
 
 	// 构建查询条件
 	whereClause := ""
 	args := []interface{}{}
+
+	// 非管理员只能看到自己的数据
+	if !isAdmin.(bool) {
+		whereClause += " AND user_id = ?"
+		args = append(args, userID)
+	}
 
 	// 卡号搜索（支持模糊匹配）
 	if cardNoFilter != "" {
@@ -1171,6 +1270,12 @@ type ImportResult struct {
 }
 
 func importFromCSV(c *gin.Context) {
+	// 获取当前用户ID
+	userID, _ := c.Get("user_id")
+	if userID == nil {
+		userID = 1
+	}
+
 	// 获取上传的文件
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
@@ -1264,10 +1369,10 @@ func importFromCSV(c *gin.Context) {
 			cardCheck = 1
 		}
 
-		// 插入数据
+		// 插入数据（带上 user_id）
 		_, err = tx.Exec(
-			"INSERT INTO cards (card_no, card_link, remark, query_url, query_token, card_check, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
-			cardNo, cardLink, remark, queryURL, queryToken, cardCheck,
+			"INSERT INTO cards (card_no, card_link, remark, query_url, query_token, card_check, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+			cardNo, cardLink, remark, queryURL, queryToken, cardCheck, userID,
 		)
 		if err != nil {
 			result.Failed++
@@ -1328,6 +1433,12 @@ func downloadBackup(c *gin.Context) {
 //
 // 返回：成功写入的卡密简要信息（含 query_url）
 func addCard(c *gin.Context) {
+	// 获取当前用户ID
+	userID, _ := c.Get("user_id")
+	if userID == nil {
+		userID = 1 // 默认用户
+	}
+
 	var req struct {
 		Text            string `json:"text" binding:"required"`
 		AllowDuplicates bool   `json:"allow_duplicates"`
@@ -1418,8 +1529,8 @@ func addCard(c *gin.Context) {
 		queryURL := fmt.Sprintf("%s/query?card=%s", baseURL, url.QueryEscape(queryToken))
 
 		result, err := tx.Exec(
-			"INSERT INTO cards (card_no, card_link, phone, remark, query_url, query_token, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
-			card.CardNo, card.CardLink, card.Phone, req.Remark, queryURL, queryToken,
+			"INSERT INTO cards (card_no, card_link, phone, remark, query_url, query_token, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+			card.CardNo, card.CardLink, card.Phone, req.Remark, queryURL, queryToken, userID,
 		)
 		if err != nil {
 			log.Printf("添加失败 %s: %v", card.CardNo, err)
@@ -2182,6 +2293,119 @@ func cleanPhoneNumber(phone string) string {
 	return phone
 }
 
+// ==================== 用户管理 ====================
+
+// User 用户结构
+type User struct {
+	ID        int       `json:"id"`
+	Password  string    `json:"password"`
+	IsAdmin   bool      `json:"is_admin"`
+	CreatedAt string    `json:"created_at"`
+}
+
+// 列出所有用户（仅管理员）
+func listUsers(c *gin.Context) {
+	isAdmin, exists := c.Get("is_admin")
+	if !exists || !isAdmin.(bool) {
+		c.JSON(403, Response{Code: -1, Message: "权限不足"})
+		return
+	}
+
+	rows, err := db.Query("SELECT id, password, is_admin, created_at FROM users ORDER BY id")
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "查询失败: " + err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Password, &u.IsAdmin, &u.CreatedAt); err == nil {
+			users = append(users, u)
+		}
+	}
+
+	c.JSON(200, Response{Code: 0, Data: users})
+}
+
+// 创建用户（仅管理员）
+type CreateUserRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
+func createUser(c *gin.Context) {
+	isAdmin, exists := c.Get("is_admin")
+	if !exists || !isAdmin.(bool) {
+		c.JSON(403, Response{Code: -1, Message: "权限不足"})
+		return
+	}
+
+	var req CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, Response{Code: -1, Message: "密码不能为空"})
+		return
+	}
+
+	result, err := db.Exec("INSERT INTO users (password, is_admin) VALUES (?, ?)", req.Password, false)
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "创建失败: " + err.Error()})
+		return
+	}
+
+	userID, _ := result.LastInsertId()
+	c.JSON(200, Response{
+		Code:    0,
+		Message: "创建成功",
+		Data: map[string]interface{}{
+			"id":       userID,
+			"password": req.Password,
+		},
+	})
+}
+
+// 删除用户（仅管理员，不能删除自己）
+func deleteUser(c *gin.Context) {
+	isAdmin, exists := c.Get("is_admin")
+	if !exists || !isAdmin.(bool) {
+		c.JSON(403, Response{Code: -1, Message: "权限不足"})
+		return
+	}
+
+	userID := c.Param("id")
+	if userID == "" {
+		c.JSON(400, Response{Code: -1, Message: "用户ID不能为空"})
+		return
+	}
+
+	// 获取当前用户ID
+	currentUserID, _ := c.Get("user_id")
+
+	// 不能删除自己
+	if fmt.Sprintf("%v", currentUserID) == userID {
+		c.JSON(400, Response{Code: -1, Message: "不能删除自己"})
+		return
+	}
+
+	// 先删除该用户的所有卡密
+	_, _ = db.Exec("DELETE FROM cards WHERE user_id = ?", userID)
+
+	// 删除用户
+	result, err := db.Exec("DELETE FROM users WHERE id = ? AND is_admin = 0", userID)
+	if err != nil {
+		c.JSON(500, Response{Code: -1, Message: "删除失败: " + err.Error()})
+		return
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(404, Response{Code: -1, Message: "用户不存在或为管理员"})
+		return
+	}
+
+	c.JSON(200, Response{Code: 0, Message: "删除成功"})
+}
+
 // ==================== 主函数 ====================
 // 应用入口：初始化静态托管、路由与 CORS，并启动服务
 func main() {
@@ -2209,26 +2433,36 @@ func main() {
 
 	api := r.Group("/api")
 	{
+		// 公开接口
 		api.POST("/admin/login", adminLogin)
-		api.GET("/admin/verify", adminVerify)
-		api.GET("/admin/settings", getSettings)
-		api.GET("/cards", getAllCards)
-		api.POST("/cards", addCard)
-		api.PUT("/cards/:id/remark", updateRemark)
-		api.DELETE("/admin/batch-delete", batchDelete)
-		api.POST("/admin/export", batchExport)
-		api.GET("/admin/backup", createBackup)              // 创建备份
-		api.GET("/admin/backups", listBackups)              // 列出备份
-		api.GET("/admin/backup/download", downloadBackup)   // 下载备份
-		api.POST("/admin/restore", restoreBackup)           // 恢复备份
-		api.DELETE("/admin/backup/:name", deleteBackup)     // 删除备份
-		api.GET("/admin/export/full", exportFullCSV)        // 导出完整CSV
-		api.POST("/admin/import", importFromCSV)            // 从CSV导入
 		api.GET("/cards/query", queryCard)
-		api.GET("/cards/status", getCardQueryStatus)        // 查询任务状态
+		api.GET("/cards/status", getCardQueryStatus)
 		api.GET("/cards/live", getLiveCodes)
 		api.POST("/sms/push", receiveSMSPush)
 		api.GET("/sms/live", getLiveSMSCodes)
+
+		// 需要认证的接口
+		auth := api.Group("/")
+		auth.Use(AuthMiddleware())
+		{
+			auth.GET("/admin/verify", adminVerify)
+			auth.GET("/admin/settings", getSettings)
+			auth.GET("/admin/users", listUsers)
+			auth.POST("/admin/users", createUser)
+			auth.DELETE("/admin/users/:id", deleteUser)
+			auth.GET("/cards", getAllCards)
+			auth.POST("/cards", addCard)
+			auth.PUT("/cards/:id/remark", updateRemark)
+			auth.DELETE("/admin/batch-delete", batchDelete)
+			auth.POST("/admin/export", batchExport)
+			auth.GET("/admin/backup", createBackup)
+			auth.GET("/admin/backups", listBackups)
+			auth.GET("/admin/backup/download", downloadBackup)
+			auth.POST("/admin/restore", restoreBackup)
+			auth.DELETE("/admin/backup/:name", deleteBackup)
+			auth.GET("/admin/export/full", exportFullCSV)
+			auth.POST("/admin/import", importFromCSV)
+		}
 	}
 
 	// 启动定时清理过期查询任务
