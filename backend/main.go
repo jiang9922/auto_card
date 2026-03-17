@@ -1227,11 +1227,9 @@ func importFromCSV(c *gin.Context) {
 		// 解析字段
 		cardNo := strings.TrimSpace(record[1])     // 卡号
 		cardLink := strings.TrimSpace(record[2])   // 原链接
-		// queryURL := strings.TrimSpace(record[3])   // 查询链接（导入时重新生成）
-		// queryToken := strings.TrimSpace(record[4]) // 查询Token（导入时重新生成）
+		queryTokenFromCSV := strings.TrimSpace(record[4]) // 查询Token（用于判断是否重复）
 		statusStr := strings.TrimSpace(record[5])  // 状态
 		remark := strings.TrimSpace(record[6])     // 备注
-		// createdAt := strings.TrimSpace(record[7])  // 创建时间（使用当前时间）
 
 		// 验证必填字段
 		if cardNo == "" || cardLink == "" {
@@ -1240,17 +1238,19 @@ func importFromCSV(c *gin.Context) {
 			continue
 		}
 
-		// 检查卡号是否已存在
-		var exists bool
-		err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM cards WHERE card_no = ?)", cardNo).Scan(&exists)
-		if err != nil {
-			result.Failed++
-			result.FailedRows = append(result.FailedRows, fmt.Sprintf("第%d行: 检查重复失败", rowNum))
-			continue
-		}
-		if exists {
-			result.Skipped++
-			continue
+		// 如果 CSV 中有 query_token，检查是否已存在相同的查询链接
+		if queryTokenFromCSV != "" {
+			var exists bool
+			err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM cards WHERE query_token = ?)", queryTokenFromCSV).Scan(&exists)
+			if err != nil {
+				result.Failed++
+				result.FailedRows = append(result.FailedRows, fmt.Sprintf("第%d行: 检查重复失败", rowNum))
+				continue
+			}
+			if exists {
+				result.Skipped++
+				continue
+			}
 		}
 
 		// 生成新的查询Token和URL

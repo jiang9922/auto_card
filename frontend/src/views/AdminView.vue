@@ -60,7 +60,7 @@
               <ul>
                 <li>第一行为表头：序号、卡号、原链接、查询链接、查询Token、状态、备注、创建时间</li>
                 <li>数据从第二行开始</li>
-                <li>已存在的卡号会自动跳过</li>
+                <li>已存在的查询链接会自动跳过</li>
               </ul>
             </div>
           </div>
@@ -343,7 +343,7 @@ function confirmImport() {
   confirmModal.value = {
     show: true,
     title: '确认导入数据',
-    message: `确定要导入文件 "${selectedFileName.value}" 吗？\n已存在的卡号会被自动跳过。`,
+    message: `确定要导入文件 "${selectedFileName.value}" 吗？\n已存在的查询链接会被自动跳过。`,
     onConfirm: async () => {
       confirmModal.value.show = false
       await importCSV()
